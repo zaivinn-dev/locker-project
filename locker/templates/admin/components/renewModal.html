@@ -1,0 +1,124 @@
+<!-- Renew Membership Modal -->
+<div class="modal fade" id="renewModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+      
+      <!-- Header -->
+      <div class="modal-header" style="background: var(--brand-blue); color: white; border: none;">
+        <h5 class="modal-title fw-bold">Renew Membership</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+
+      <!-- Body -->
+      <div class="modal-body">
+        <!-- Info Icon -->
+        <div class="text-center mb-4">
+          <div style="width: 60px; height: 60px; background: #cce5ff; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" style="color: var(--brand-blue);">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Member Info Card -->
+        <div class="card" style="border: 1px solid #e9ecef; border-radius: 0.5rem;">
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="text-muted small fw-bold" style="letter-spacing: 0.05em; text-transform: uppercase;">Member Name</label>
+              <p id="renewName" class="mb-0 fw-bold" style="font-size: 1.1rem;"></p>
+            </div>
+
+            <hr class="my-3" />
+
+            <!-- Expiry Timeline -->
+            <div class="row">
+              <div class="col-6">
+                <label class="text-muted small fw-bold" style="letter-spacing: 0.05em; text-transform: uppercase;">Current Expires</label>
+                <p id="renewCurrentExpiry" class="mb-0" style="font-size: 0.9rem; color: #dc3545;"></p>
+              </div>
+              <div class="col-6">
+                <label class="text-muted small fw-bold" style="letter-spacing: 0.05em; text-transform: uppercase;">New Expires</label>
+                <p id="renewNewExpiry" class="mb-0" style="font-size: 0.9rem; color: #28a745; font-weight: bold;"></p>
+              </div>
+            </div>
+
+            <hr class="my-3" />
+
+            <!-- Renewal Details -->
+            <div class="alert alert-success d-flex gap-2" style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; border-radius: 0.25rem; margin-bottom: 0;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink: 0; margin-top: 0.1rem;">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm-2-13h4v6h-4z"/>
+              </svg>
+              <div>
+                <strong>Renewal Details:</strong>
+                <p id="renewDetails" class="mb-0 mt-1" style="font-size: 0.9rem;"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="modal-footer" style="border-top: 1px solid #e9ecef;">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="confirmRenewBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+          </svg>
+          Confirm Renewal
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  /**
+   * Show renew membership confirmation modal
+   * @param {object} data - Data object with id, name, current_expiry, renewal_period (days)
+   * @param {function} callback - Callback function to execute on confirm
+   */
+  function showRenewModal(data, callback) {
+    // Calculate new expiry date (30 days from now)
+    const now = new Date();
+    const newExpiry = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    
+    // Format dates
+    const currentExpiryDate = new Date(data.current_expiry);
+    const currentExpiryStr = currentExpiryDate.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+    
+    const newExpiryStr = newExpiry.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric' 
+    });
+    
+    // Calculate days added
+    const timeDiff = newExpiry - currentExpiryDate;
+    const daysAdded = Math.ceil(timeDiff / (1000 * 60 * 60 * 24));
+    
+    // Update modal content
+    document.getElementById('renewName').textContent = data.name || 'Member';
+    document.getElementById('renewCurrentExpiry').textContent = currentExpiryStr || 'Expired';
+    document.getElementById('renewNewExpiry').textContent = newExpiryStr;
+    document.getElementById('renewDetails').textContent = `Membership will be extended by ${daysAdded} days. Member can continue using their locker after renewal.`;
+
+    // Handle confirm button
+    const confirmBtn = document.getElementById('confirmRenewBtn');
+    confirmBtn.onclick = () => {
+      const modal = bootstrap.Modal.getInstance(document.getElementById('renewModal'));
+      modal.hide();
+      if (callback && typeof callback === 'function') {
+        callback();
+      }
+    };
+
+    const modal = new bootstrap.Modal(document.getElementById('renewModal'));
+    modal.show();
+  }
+</script>

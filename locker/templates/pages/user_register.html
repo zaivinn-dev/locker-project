@@ -1,0 +1,563 @@
+{% extends "layouts/base.html" %}
+{% block title %}Register Member{% endblock %}
+{% block body %}
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Hide scrollbar but allow scrolling */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+  
+  html, body {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Progress indicator */
+  .enrollment-progress {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 32px;
+    font-size: 12px;
+    color: #7a8fa6;
+    flex-wrap: wrap;
+  }
+  .progress-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .progress-step.active {
+    color: #185fa5;
+    font-weight: 600;
+  }
+  .progress-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #e8eef7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .progress-step.active .progress-dot {
+    background: #185fa5;
+    color: #fff;
+  }
+  .progress-sep {
+    width: 8px;
+    height: 2px;
+    background: #e8eef7;
+  }
+  .progress-sep.active {
+    background: #185fa5;
+  }
+
+  /* Responsive progress */
+  @media (max-width: 768px) {
+    .enrollment-progress {
+      gap: 8px;
+      margin-bottom: 24px;
+      font-size: 10px;
+    }
+    .progress-dot {
+      width: 20px;
+      height: 20px;
+      font-size: 9px;
+    }
+    .progress-sep {
+      width: 6px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .enrollment-progress {
+      gap: 6px;
+      margin-bottom: 16px;
+      font-size: 9px;
+    }
+    .progress-dot {
+      width: 18px;
+      height: 18px;
+      font-size: 8px;
+    }
+    .progress-sep {
+      width: 4px;
+    }
+    .progress-step span {
+      display: none;
+    }
+  }
+
+  /* Form field styles */
+  .form-field {
+    position: relative;
+  }
+
+  .form-field label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #7a8fa6;
+    margin-bottom: 8px;
+  }
+
+  .required-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    background: #fee;
+    color: #d32f2f;
+    border-radius: 2px;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  .form-field input,
+  .form-field select {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: 10px;
+    border: 1.5px solid #e2e8f0;
+    font-family: inherit;
+    font-size: 17px;
+    color: #1a2d3e;
+    outline: none;
+    transition: all 0.15s ease;
+    background: #fff;
+  }
+
+  .form-field input:focus,
+  .form-field select:focus {
+    border-color: #378add;
+    background: #f8fbff;
+    box-shadow: 0 0 0 3px rgba(55, 138, 221, 0.1);
+  }
+
+  .form-field select {
+    appearance: none;
+    background-image: url('data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2712%27%20height=%278%27%20viewBox=%270%200%2012%208%27%3E%3Cpath%20d=%27M1%201l5%205%205-5%27%20stroke=%27%237a8fa6%27%20stroke-width=%271.5%27%20fill=%27none%27%20stroke-linecap=%27round%27/%3E%3C/svg%3E');
+    background-repeat: no-repeat;
+    background-position: right 14px center;
+    padding-right: 40px;
+    cursor: pointer;
+  }
+
+  .form-field select:focus {
+    background-image: url('data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20width=%2712%27%20height=%278%27%20viewBox=%270%200%2012%208%27%3E%3Cpath%20d=%27M1%201l5%205%205-5%27%20stroke=%27%23378add%27%20stroke-width=%271.5%27%20fill=%27none%27%20stroke-linecap=%27round%27/%3E%3C/svg%3E');
+  }
+
+  /* Responsive form fields */
+  @media (max-width: 768px) {
+    .form-field label {
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .form-field input,
+    .form-field select {
+      padding: 13px 15px;
+      font-size: 16px;
+      min-height: 44px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .form-field label {
+      font-size: 11px;
+      margin-bottom: 5px;
+    }
+
+    .form-field input,
+    .form-field select {
+      padding: 12px 14px;
+      font-size: 16px;  /* Prevent iOS zoom */
+      min-height: 48px;  /* Touch target */
+    }
+  }
+
+  /* Form grid - responsive */
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin-bottom: 1.75rem;
+  }
+
+  @media (max-width: 992px) {
+    .form-grid {
+      gap: 1.5rem;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .form-grid {
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .form-grid {
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+  }
+
+  /* Button styles */
+  .btn-back {
+    padding: 15px;
+    border-radius: 12px;
+    border: 1.5px solid #e2e8f0;
+    background: #fff;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #7a8fa6;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn-back:hover {
+    background: #f4f6f9;
+    border-color: #ccd5de;
+  }
+
+  .btn-back:active {
+    transform: scale(0.98);
+  }
+
+  .btn-continue {
+    padding: 15px;
+    border-radius: 12px;
+    border: none;
+    background: #185fa5;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn-continue:hover {
+    background: #0d2a45;
+    box-shadow: 0 4px 12px rgba(24, 95, 165, 0.2);
+  }
+
+  .btn-continue:active {
+    transform: scale(0.98);
+  }
+
+  /* Responsive buttons */
+  @media (max-width: 768px) {
+    .btn-back, .btn-continue {
+      padding: 13px 14px;
+      font-size: 13px;
+      min-height: 46px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .btn-back, .btn-continue {
+      padding: 12px 14px;
+      font-size: 12px;
+      min-height: 48px;
+    }
+  }
+
+  /* Mobile header adjustment */
+  @media (max-width: 768px) {
+    .register-card-header {
+      flex-direction: column;
+      align-items: flex-start !important;
+      gap: 12px !important;
+      margin-bottom: 0.6rem !important;
+    }
+    
+    .register-card-header h1 {
+      font-size: 15px !important;
+    }
+
+    .register-card-header p {
+      font-size: 12px !important;
+    }
+    
+    .als-main {
+      padding: 1.25rem 15px !important;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .register-card-header {
+      flex-direction: column;
+      align-items: flex-start !important;
+      gap: 10px !important;
+      margin-bottom: 0.5rem !important;
+    }
+
+    .register-card-header h1 {
+      font-size: 14px !important;
+    }
+
+    .register-card-header p {
+      font-size: 11px !important;
+    }
+    
+    .als-main {
+      padding: 1rem 12px !important;
+    }
+
+    /* Card padding */
+    .card, [style*="background:#fff"] {
+      padding: 1rem !important;
+    }
+  }
+
+  /* Max width on tablet/mobile */
+  @media (max-width: 768px) {
+    [style*="max-width:780px"] {
+      max-width: 100% !important;
+    }
+  }
+
+  /* Card styling responsive */
+  @media (max-width: 768px) {
+    [style*="background:#fff; border-radius:20px"] {
+      border-radius: 16px !important;
+      padding: 1rem !important;
+    }
+  }
+
+  @media (max-width: 480px) {
+    [style*="background:#fff; border-radius:20px"] {
+      border-radius: 14px !important;
+      padding: 0.875rem !important;
+    }
+  }
+
+  /* Divider responsive */
+  @media (max-width: 480px) {
+    [style*="border-top:1px solid #f0f2f5"] {
+      margin: 1rem 0 !important;
+    }
+  }
+
+  /* Step hint responsive */
+  @media (max-width: 768px) {
+    [style*="background:#f4f6f9; border-radius:10px"] {
+      padding: 10px 12px !important;
+      margin-bottom: 1.2rem !important;
+      font-size: 12px !important;
+    }
+
+    [style*="background:#f4f6f9; border-radius:10px"] p {
+      font-size: 11px !important;
+      margin: 0 !important;
+    }
+  }
+
+  @media (max-width: 480px) {
+    [style*="background:#f4f6f9; border-radius:10px"] {
+      padding: 8px 10px !important;
+      margin-bottom: 1rem !important;
+      font-size: 10px !important;
+    }
+
+    [style*="background:#f4f6f9; border-radius:10px"] p {
+      font-size: 9px !important;
+    }
+  }
+
+  /* Error message */
+  @media (max-width: 480px) {
+    [style*="background:#fff0f0"] {
+      font-size: 12px !important;
+      padding: 10px 12px !important;
+      margin-bottom: 1rem !important;
+    }
+  }
+
+  /* Icon sizing */
+  @media (max-width: 768px) {
+    .register-card-header [style*="width:48px"] {
+      width: 42px !important;
+      height: 42px !important;
+    }
+
+    .register-card-header svg {
+      width: 20px !important;
+      height: 20px !important;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .register-card-header [style*="width:48px"] {
+      width: 38px !important;
+      height: 38px !important;
+    }
+
+    .register-card-header svg {
+      width: 18px !important;
+      height: 18px !important;
+    }
+  }
+</style>
+
+<nav class="als-nav">
+  <a href="/" class="als-logo-circle" style="text-decoration:none;">
+    <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" />
+  </a>
+  <span class="als-brand">Register Member</span>
+</nav>
+
+<main class="als-main" style="align-items:center; padding-top: 1.5rem !important;">
+  <div style="width:100%; max-width:780px; margin:0 auto; box-sizing:border-box;">
+
+    <!-- Header -->
+    <div class="register-card-header" style="display:flex; align-items:center; gap:10px; margin-bottom:0.5rem;">
+      <div style="width:48px; height:48px; border-radius:14px; background:#e8f4fd;
+                  display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="11" r="5.5" fill="#185fa5"/>
+          <path d="M7 28c0-5 4-9 9-9s9 4 9 9" fill="#185fa5"/>
+        </svg>
+      </div>
+      <div>
+        <h1 style="margin:0; font-size:18px; font-weight:800; color:#1a2d3e; letter-spacing:0.02em;">Member Details</h1>
+        <p style="margin:0; font-size:14px; color:#7a8fa6; margin-top:2px;">
+          Complete all fields before fingerprint enrollment.
+        </p>
+      </div>
+    </div>
+
+    <!-- Card -->
+    <div style="background:#fff; border-radius:20px; border:1px solid #e2e8f0; padding:1.25rem;">
+
+      {% if error %}
+      <div style="background:#fff0f0; border:1px solid #f5c1c1; border-radius:10px;
+                  padding:12px 16px; margin-bottom:1.5rem; font-size:13px; color:#a32d2d;">
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="post">
+
+        <div class="form-grid">
+          <!-- LEFT COLUMN -->
+          <div>
+            <!-- Full Name -->
+            <div class="form-field" style="margin-bottom:1rem;">
+              <label for="full_name">
+                Full Name
+                <span class="required-badge">*</span>
+              </label>
+              <input type="text" id="full_name" name="full_name" autocomplete="name" required
+                     placeholder="e.g. Juan Dela Cruz"
+                     value="{{ (form_data.full_name if form_data else '') | e }}" />
+            </div>
+
+            <!-- Address -->
+            <div class="form-field" style="margin-bottom:1rem;">
+              <label for="address">
+                Address
+                <span class="required-badge">*</span>
+              </label>
+              <input type="text" id="address" name="address" required
+                     placeholder="House / Street / Barangay / City"
+                     value="{{ (form_data.address if form_data else '') | e }}" />
+            </div>
+          </div>
+
+          <!-- RIGHT COLUMN -->
+          <div>
+            <!-- Contact Number -->
+            <div class="form-field" style="margin-bottom:1rem;">
+              <label for="contact_number">
+                Contact Number
+                <span class="required-badge">*</span>
+              </label>
+              <input type="text" id="contact_number" name="contact_number" required
+                     placeholder="09XXXXXXXXX"
+                     value="{{ (form_data.contact_number if form_data else '') | e }}" />
+            </div>
+
+            <!-- Age -->
+            <div class="form-field" style="margin-bottom:1rem;">
+              <label for="age">
+                Age
+                <span class="required-badge">*</span>
+              </label>
+              <input type="number" id="age" name="age" min="1" placeholder="18"
+                     value="{{ (form_data.age if form_data else '') | e }}" />
+            </div>
+
+            <!-- Category -->
+            <div class="form-field" style="margin-bottom:1rem;">
+              <label for="category">
+                Category
+                <span class="required-badge">*</span>
+              </label>
+              <select id="category" name="category">
+                <option value="" {% if not form_data or not form_data.category %}selected{% endif %}>Select...</option>
+                <option value="student" {% if form_data and form_data.category == 'student' %}selected{% endif %}>Student</option>
+                <option value="adult"   {% if form_data and form_data.category == 'adult'   %}selected{% endif %}>Adult</option>
+                <option value="senior"  {% if form_data and form_data.category == 'senior'  %}selected{% endif %}>Senior</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Divider -->
+        <div style="border-top:1px solid #f0f2f5; margin:1.5rem 0;"></div>
+
+        <!-- Buttons -->
+        <div style="display:flex; gap:12px;">
+          <button type="button" onclick="window.location.href='/'"
+                  class="btn-back"
+                  style="flex:1;">
+            ← Back
+          </button>
+          <button type="submit"
+                  class="btn-continue"
+                  style="flex:2;">
+            Save &amp; Continue →
+          </button>
+        </div>
+
+      </form>
+    </div>
+  </div>
+</main>
+
+{% endblock %}
+

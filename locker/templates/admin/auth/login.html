@@ -1,0 +1,144 @@
+{% extends "layouts/base.html" %}
+{% block title %}Admin Login{% endblock %}
+{% block body %}
+
+<nav class="als-nav">
+  <a href="/" class="als-logo-circle" style="text-decoration:none;">
+    <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" />
+  </a>
+  <span class="als-brand">Admin Login</span>
+</nav>
+
+<main class="als-main" style="padding: 2.5rem 1.5rem;">
+  <div style="width:100%; max-width:400px;">
+
+    <!-- Header -->
+    <div style="text-align:center; margin-bottom:2rem;">
+      <div style="width:64px; height:64px; border-radius:18px; background:#e8f4fd;
+                  display:flex; align-items:center; justify-content:center; margin:0 auto 1rem;">
+        <svg width="30" height="30" viewBox="0 0 30 30" fill="none">
+          <rect x="5" y="13" width="20" height="14" rx="4" fill="#b5d4f4"/>
+          <rect x="8" y="16" width="14" height="8" rx="2" fill="#185fa5"/>
+          <path d="M10 13V10a5 5 0 0 1 10 0v3" stroke="#185fa5" stroke-width="2"
+                stroke-linecap="round" fill="none"/>
+          <circle cx="15" cy="20" r="2" fill="#b5d4f4"/>
+        </svg>
+      </div>
+      <h1 style="margin:0 0 6px; font-size:22px; font-weight:800; color:#1a2d3e; letter-spacing:0.02em;">
+        Admin Sign In
+      </h1>
+      <p style="margin:0; font-size:13px; color:#7a8fa6; line-height:1.5;">
+        Access to dashboard, members, logs &amp; settings.
+      </p>
+    </div>
+
+    <!-- Card -->
+    <div style="background:#fff; border-radius:20px; border:1px solid #e2e8f0; padding:2rem;">
+
+      {% if error %}
+      <div style="background:#fff0f0; border:1px solid #f5c1c1; border-radius:10px;
+                  padding:12px 16px; margin-bottom:1.5rem; font-size:13px; color:#a32d2d;
+                  display:flex; align-items:center; gap:8px;">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="flex-shrink:0;">
+          <circle cx="7" cy="7" r="6.5" stroke="#a32d2d" stroke-width="1.2"/>
+          <rect x="6.3" y="3.5" width="1.4" height="4.5" rx="0.7" fill="#a32d2d"/>
+          <circle cx="7" cy="10" r="0.8" fill="#a32d2d"/>
+        </svg>
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="post">
+
+        <!-- Username -->
+        <div style="margin-bottom:1.25rem;">
+          <label for="username" style="display:block; font-size:12px; font-weight:700;
+                 letter-spacing:0.1em; text-transform:uppercase; color:#7a8fa6; margin-bottom:6px;">
+            Username
+          </label>
+          <input type="text" id="username" name="username" autocomplete="username" required
+                 value="{{ last_username or '' }}"
+                 style="width:100%; padding:12px 14px; border-radius:10px; border:1.5px solid #e2e8f0;
+                        font-family:inherit; font-size:15px; color:#1a2d3e; outline:none;
+                        box-sizing:border-box; transition:border-color 0.15s;"
+                 onfocus="this.style.borderColor='#378add'" onblur="this.style.borderColor='#e2e8f0'" />
+        </div>
+
+        <!-- Password -->
+        <div style="margin-bottom:1.75rem; position:relative;">
+          <label for="password" style="display:block; font-size:12px; font-weight:700;
+                 letter-spacing:0.1em; text-transform:uppercase; color:#7a8fa6; margin-bottom:6px;">
+            Password
+          </label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required
+                 style="width:100%; padding:12px 42px 12px 14px; border-radius:10px; border:1.5px solid #e2e8f0;
+                        font-family:inherit; font-size:15px; color:#1a2d3e; outline:none;
+                        box-sizing:border-box; transition:border-color 0.15s;"
+                 onfocus="this.style.borderColor='#378add'" onblur="this.style.borderColor='#e2e8f0'" />
+          <!-- Toggle visibility -->
+          <button type="button" onclick="togglePw()"
+                  style="position:absolute; right:12px; bottom:12px; background:none; border:none;
+                         cursor:pointer; padding:0; color:#9aabb8;"
+                  title="Show/hide password">
+            <svg id="pw-eye" width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <ellipse cx="9" cy="9" rx="7" ry="4.5" stroke="#9aabb8" stroke-width="1.4"/>
+              <circle cx="9" cy="9" r="2" fill="#9aabb8"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Submit -->
+        <button type="submit"
+                style="width:100%; padding:13px; border-radius:12px; border:none;
+                       background:#1a3a5c; font-family:inherit; font-size:13px; font-weight:700;
+                       letter-spacing:0.08em; text-transform:uppercase; color:#fff;
+                       cursor:pointer; transition:background 0.15s;"
+                onmouseover="this.style.background='#0d2a45'"
+                onmouseout="this.style.background='#1a3a5c'">
+          Sign In →
+        </button>
+
+      </form>
+
+      <!-- Divider -->
+      <div style="border-top:1px solid #f0f2f5; margin:1.5rem 0;"></div>
+
+      <!-- Demo hint -->
+      <div style="display:flex; align-items:center; gap:10px;
+                  background:#f4f6f9; border-radius:10px; padding:12px 14px;">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style="flex-shrink:0;">
+          <circle cx="7" cy="7" r="6.5" stroke="#378add" stroke-width="1.2"/>
+          <rect x="6.3" y="6" width="1.4" height="4.5" rx="0.7" fill="#378add"/>
+          <circle cx="7" cy="4.5" r="0.8" fill="#378add"/>
+        </svg>
+        <p style="margin:0; font-size:12px; color:#7a8fa6; line-height:1.5;">
+          Demo account: <strong style="color:#1a3a5c;">admin</strong> /
+          <strong style="color:#1a3a5c;">admin123</strong>
+        </p>
+      </div>
+
+    </div>
+
+    <!-- Back link -->
+    <div style="text-align:center; margin-top:1.25rem;">
+      <a href="/" style="font-size:13px; font-weight:700; color:#9aabb8; text-decoration:none;
+                         letter-spacing:0.06em; text-transform:uppercase; transition:color 0.15s;"
+         onmouseover="this.style.color='#1a3a5c'" onmouseout="this.style.color='#9aabb8'">
+        ← Back to Home
+      </a>
+    </div>
+
+  </div>
+</main>
+
+{% block extra_js %}
+<script>
+  function togglePw() {
+    const inp = document.getElementById('password');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }
+</script>
+{% endblock %}
+
+{% endblock %}
+

@@ -1,0 +1,60 @@
+<div style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; z-index:9999;">
+  <div style="background:#fff; border-radius:16px; padding:1.5rem; max-width:700px; width:95%; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,0.3); max-height:90vh; overflow-y:auto;">
+    
+    <!-- Success icon -->
+    <div style="width:60px; height:60px; border-radius:50%; background:#d1fae5; display:flex; align-items:center; justify-content:center; margin:0 auto 1rem;">
+      <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+        <circle cx="24" cy="24" r="23" stroke="#065f46" stroke-width="2"/>
+        <path d="M18 24l6 6 12-12" stroke="#065f46" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </svg>
+    </div>
+
+    <!-- Title -->
+    <h1 style="margin:0 0 0.3rem; font-size:20px; font-weight:800; color:#065f46; letter-spacing:0.02em;">
+      {% if is_duplicate %}
+        Registration Already Exist
+      {% else %}
+        Registration Successful!
+      {% endif %}
+    </h1>
+    
+    <!-- Subtitle -->
+    <p style="margin:0 0 1rem; font-size:13px; color:#7a8fa6; line-height:1.5;">
+      {% if is_duplicate %}
+        Your registration has already been submitted and is awaiting admin approval.
+      {% else %}
+        Your registration has been submitted for admin approval.
+      {% endif %}
+    </p>
+
+    <!-- Details card -->
+    <div style="background:#f0fdf4; border:1px solid #dbeafe; border-radius:10px; padding:1rem; margin-bottom:1rem; text-align:left;">
+      <div style="margin-bottom:0.7rem;">
+        <p style="margin:0 0 2px; font-size:11px; font-weight:700; color:#7a8fa6; text-transform:uppercase; letter-spacing:0.1em;">Member Name</p>
+        <p style="margin:0; font-size:13px; font-weight:600; color:#1a2d3e;">{{ member_name }}</p>
+      </div>
+      <div style="margin-bottom:0.7rem;">
+        <p style="margin:0 0 2px; font-size:11px; font-weight:700; color:#7a8fa6; text-transform:uppercase; letter-spacing:0.1em;">Status</p>
+        <p style="margin:0; font-size:13px; font-weight:600; color:#f59e0b;">Pending Approval</p>
+      </div>
+      <div>
+        <p style="margin:0 0 2px; font-size:11px; font-weight:700; color:#7a8fa6; text-transform:uppercase; letter-spacing:0.1em;">Next Steps</p>
+        <p style="margin:0; font-size:12px; color:#7a8fa6; line-height:1.4;">
+          Admin will review and confirm your membership.
+        </p>
+      </div>
+    </div>
+
+    <!-- Info box -->
+    <div style="background:#fff9f0; border:1px solid #fed7aa; border-radius:10px; padding:0.75rem; margin-bottom:1rem;">
+      <p style="margin:0; font-size:11px; color:#a16207; line-height:1.4;">
+        <strong>Note:</strong> Fingerprint enrolled. Locker assignment pending admin approval.
+      </p>
+    </div>
+
+    <!-- Button -->
+    <a href="/" style="display:block; padding:10px 20px; border-radius:10px; border:none; background:#065f46; color:#fff; text-decoration:none; font-family:inherit; font-size:12px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; transition:background 0.15s ease; width:100%; box-sizing:border-box;">
+      ← Back to Home
+    </a>
+  </div>
+</div>

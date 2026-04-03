@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "locker-system"
+version = "0.1.0"
+description = "IoT-based Automated Locker System"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "Flask>=3.0.0",
+    "pyserial>=3.5",
+]
+
+[project.scripts]
+locker-web = "locker.web:create_app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["locker*"]

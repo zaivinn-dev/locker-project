@@ -1,0 +1,106 @@
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+      
+      <!-- Header -->
+      <div class="modal-header" style="background: var(--brand-blue); color: white; border: none;">
+        <h5 class="modal-title fw-bold">Confirm Delete</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+
+      <!-- Body -->
+      <div class="modal-body">
+        <div class="alert alert-warning d-flex gap-3" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 0.5rem;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="color: #ff9800; flex-shrink: 0; margin-top: 0.2rem;">
+            <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+          </svg>
+          <div>
+            <strong>Are you sure?</strong>
+            <p id="deleteMessage" class="mb-0 mt-1" style="font-size: 0.95rem;"></p>
+          </div>
+        </div>
+
+        <div class="mt-3 p-3" style="background: #f4f5fb; border-radius: 0.5rem; border-left: 3px solid var(--brand-blue);">
+          <strong>Details:</strong>
+          <ul class="mb-0 mt-2" style="font-size: 0.9rem; line-height: 1.6;">
+            <li id="deleteDetail1"></li>
+            <li id="deleteDetail2" style="display: none;"></li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="modal-footer" style="border-top: 1px solid #e9ecef;">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirmDeleteBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;">
+            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-9l-1 1H5v2h14V4z"/>
+          </svg>
+          Delete
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  /**
+   * Show delete confirmation modal
+   * @param {string} type - Type of item: 'member', 'guest', 'locker'
+   * @param {object} data - Data object with id, name, and optional details
+   * @param {function} callback - Callback function to execute on confirm
+   */
+  function showDeleteModal(type, data, callback) {
+    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    
+    // Set message based on type
+    let message = '';
+    let detail1 = '';
+    let detail2 = '';
+    let showDetail2 = false;
+
+    if (type === 'member') {
+      message = `You are about to permanently delete the member <strong>${data.name}</strong>.`;
+      detail1 = `Member: ${data.name}`;
+      if (data.locker_id) {
+        detail2 = `Their locker (Locker ${data.locker_id}) will be freed and available for reassignment.`;
+        showDetail2 = true;
+      }
+    } else if (type === 'guest') {
+      message = `You are about to permanently delete the guest RFID <strong>${data.rfid_uid}</strong>.`;
+      detail1 = `RFID UID: ${data.rfid_uid}`;
+      if (data.locker_id) {
+        detail2 = `Their assigned locker (Locker ${data.locker_id}) will be freed.`;
+        showDetail2 = true;
+      }
+    } else if (type === 'locker') {
+      message = `You are about to unassign locker <strong>${data.locker_number}</strong>.`;
+      detail1 = `Locker #${data.locker_number}`;
+    }
+
+    // Update modal content
+    document.getElementById('deleteMessage').innerHTML = message;
+    document.getElementById('deleteDetail1').innerHTML = detail1;
+    
+    const detail2El = document.getElementById('deleteDetail2');
+    if (showDetail2) {
+      detail2El.innerHTML = detail2;
+      detail2El.style.display = 'block';
+    } else {
+      detail2El.style.display = 'none';
+    }
+
+    // Handle confirm button
+    const confirmBtn = document.getElementById('confirmDeleteBtn');
+    confirmBtn.onclick = () => {
+      modal.hide();
+      if (callback && typeof callback === 'function') {
+        callback();
+      }
+    };
+
+    modal.show();
+  }
+</script>

@@ -1,0 +1,605 @@
+{% extends "admin/layout/admin.html" %}
+
+{% block admin_title %}Settings{% endblock %}
+
+{% block admin_extra_head %}
+<style>
+  .settings-wrapper {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .settings-buttons {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid #e9ecef;
+    padding: 0;
+    overflow-x: auto;
+  }
+
+  .settings-btn {
+    flex: 1;
+    min-width: 140px;
+    padding: 1rem;
+    border: none;
+    background-color: #f8f9fa;
+    color: #495057;
+    font-weight: 500;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-bottom: 3px solid transparent;
+    white-space: nowrap;
+  }
+
+  .settings-btn:hover {
+    background-color: #e9ecef;
+  }
+
+  .settings-btn.active {
+    background-color: white;
+    color: var(--brand-blue);
+    border-bottom-color: var(--brand-blue);
+  }
+
+  .settings-content {
+    padding: 2rem;
+    display: none;
+  }
+
+  .settings-content.active {
+    display: block;
+  }
+
+  .settings-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    color: #212529;
+  }
+
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .form-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 0.4rem;
+    text-transform: capitalize;
+  }
+
+  .form-control {
+    font-size: 0.9rem;
+    padding: 0.6rem 0.8rem;
+    border: 1px solid #dee2e6;
+    border-radius: 0.4rem;
+    font-family: inherit;
+  }
+
+  .form-control:focus {
+    border-color: var(--brand-blue);
+    box-shadow: 0 0 0 0.2rem rgba(0, 61, 122, 0.15);
+    outline: none;
+  }
+
+  .form-hint {
+    font-size: 0.7rem;
+    color: #6c757d;
+    margin-top: 0.25rem;
+  }
+
+  .button-group {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e9ecef;
+  }
+
+  .btn {
+    padding: 0.7rem 1.5rem;
+    border-radius: 0.4rem;
+    font-weight: 500;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+  }
+
+  .btn-primary {
+    background-color: var(--brand-blue);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: #003d7a;
+  }
+
+  .btn-secondary {
+    background-color: #f8f9fa;
+    color: #495057;
+    border: 1px solid #dee2e6;
+  }
+
+  .btn-secondary:hover {
+    background-color: #e9ecef;
+  }
+
+  .alert {
+    padding: 1rem;
+    border-radius: 0.4rem;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+  }
+
+  .alert-success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+  }
+
+  .header-section {
+    padding: 1.5rem 2rem;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+  }
+
+  .admin-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0,0,0,0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .admin-modal.show {
+    display: flex;
+  }
+
+  .admin-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .admin-table thead {
+    background-color: #f8f9fa;
+    border-bottom: 2px solid #e9ecef;
+  }
+
+  .admin-table th {
+    padding: 0.75rem;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+
+  .admin-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 0.9rem;
+  }
+
+  .badge-super {
+    background-color: #d4edda;
+    color: #155724;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .badge-active {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .btn-sm {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.75rem;
+    margin: 0 0.25rem;
+  }
+
+  .btn-edit {
+    background-color: #e7f3ff;
+    color: #0056b3;
+  }
+
+  .btn-delete {
+    background-color: #ffe7e7;
+    color: #c82333;
+  }
+
+</style>
+
+<script>
+  function switchTab(tabName) {
+    // Hide all sections
+    document.querySelectorAll('.settings-content').forEach(el => {
+      el.classList.remove('active');
+    });
+
+    // Deactivate all buttons
+    document.querySelectorAll('.settings-btn').forEach(el => {
+      el.classList.remove('active');
+    });
+
+    // Show selected section
+    document.getElementById(tabName).classList.add('active');
+
+    // Activate clicked button
+    event.target.classList.add('active');
+
+    // Save preference
+    localStorage.setItem('settings-tab', tabName);
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    // Restore last opened tab
+    const lastTab = localStorage.getItem('settings-tab') || 'general';
+    const tabBtn = document.querySelector(`[data-tab="${lastTab}"]`);
+    if (tabBtn) {
+      tabBtn.click();
+    } else {
+      document.querySelector('.settings-btn').click();
+    }
+  });
+</script>
+{% endblock %}
+
+{% block admin_content %}
+  <!-- Header -->
+  <div class="header-section">
+    <div class="text-muted" style="letter-spacing:0.14em; text-transform:uppercase; font-size:0.75rem;">Admin</div>
+    <h4 class="mb-1">Settings</h4>
+    <p class="text-muted" style="font-size:0.9rem; margin: 0;">Configure system settings by clicking a button below</p>
+  </div>
+
+  <!-- Success Message -->
+  {% if request.args.get('success') %}
+  <div style="padding: 0 2rem; margin-top: 1rem;">
+    <div class="alert alert-success">
+      ✓ Settings updated successfully
+    </div>
+  </div>
+  {% endif %}
+
+  <form method="POST" action="{{ url_for('admin.admin_settings_update') }}" class="settings-wrapper">
+    
+    <!-- Tab Buttons -->
+    <div class="settings-buttons">
+      <button type="button" class="settings-btn" data-tab="general" onclick="switchTab('general')">⚙️ General</button>
+      <button type="button" class="settings-btn" data-tab="membership" onclick="switchTab('membership')">💳 Membership</button>
+      <button type="button" class="settings-btn" data-tab="guest" onclick="switchTab('guest')">🎫 Guest</button>
+      <button type="button" class="settings-btn" data-tab="facility" onclick="switchTab('facility')">🏢 Facility</button>
+      <button type="button" class="settings-btn" data-tab="hardware" onclick="switchTab('hardware')">⚡ Hardware</button>
+      <button type="button" class="settings-btn" data-tab="admin" onclick="switchTab('admin')">👤 Admin</button>
+    </div>
+
+    <!-- General Settings Tab -->
+    <div id="general" class="settings-content">
+      <h5 class="settings-title">System Configuration</h5>
+      <div class="settings-grid">
+        <div class="form-group">
+          <label class="form-label">System Name</label>
+          <input type="text" class="form-control" name="system_name" 
+                 value="{{ settings.get('system_name', 'Smart Locker') }}" 
+                 placeholder="Enter system name" maxlength="100">
+          <small class="form-hint">Display name for your facility</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Timezone</label>
+          <select class="form-control" name="timezone">
+            <option value="Asia/Manila" {% if settings.get('timezone') == 'Asia/Manila' %}selected{% endif %}>Philippine Time (GMT+8)</option>
+            <option value="Asia/Bangkok" {% if settings.get('timezone') == 'Asia/Bangkok' %}selected{% endif %}>Bangkok (GMT+7)</option>
+            <option value="UTC" {% if settings.get('timezone') == 'UTC' %}selected{% endif %}>UTC</option>
+          </select>
+          <small class="form-hint">Time zone for logs and reports</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Currency</label>
+          <input type="text" class="form-control" name="currency" 
+                 value="{{ settings.get('currency', '₱') }}" 
+                 placeholder="₱" maxlength="5">
+          <small class="form-hint">Symbol used for pricing</small>
+        </div>
+      </div>
+      <div class="button-group">
+        <button type="submit" class="btn btn-primary">💾 Save</button>
+        <button type="reset" class="btn btn-secondary">🔄 Reset</button>
+      </div>
+    </div>
+
+    <!-- Membership Settings Tab -->
+    <div id="membership" class="settings-content">
+      <h5 class="settings-title">Membership Pricing</h5>
+      <div class="settings-grid">
+        <div class="form-group">
+          <label class="form-label">Initial Fee (₱)</label>
+          <input type="number" class="form-control" name="membership_fee" 
+                 value="{{ settings.membership_fee }}" min="0" step="50">
+          <small class="form-hint">Cost to register new member</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Membership Duration (days)</label>
+          <input type="number" class="form-control" name="membership_duration" 
+                 value="{{ settings.membership_duration }}" min="1">
+          <small class="form-hint">Valid period after registration</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Renewal Fee (₱)</label>
+          <input type="number" class="form-control" name="renewal_fee" 
+                 value="{{ settings.renewal_fee }}" min="0" step="50">
+          <small class="form-hint">Cost to extend membership</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Renewal Period (days)</label>
+          <input type="number" class="form-control" name="renewal_duration" 
+                 value="{{ settings.renewal_duration }}" min="1">
+          <small class="form-hint">Days added when renewing</small>
+        </div>
+      </div>
+      <div class="button-group">
+        <button type="submit" class="btn btn-primary">💾 Save</button>
+        <button type="reset" class="btn btn-secondary">🔄 Reset</button>
+      </div>
+    </div>
+
+    <!-- Guest Access Settings Tab -->
+    <div id="guest" class="settings-content">
+      <h5 class="settings-title">Guest Access</h5>
+      <div class="settings-grid">
+        <div class="form-group">
+          <label class="form-label">Default Guest Duration (hours)</label>
+          <input type="number" class="form-control" name="default_guest_duration" 
+                 value="{{ settings.default_guest_duration }}" min="1" max="720">
+          <small class="form-hint">Default hours for guest access</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Maximum Guest Duration (hours)</label>
+          <input type="number" class="form-control" name="max_guest_duration" 
+                 value="{{ settings.max_guest_duration }}" min="1" max="2160">
+          <small class="form-hint">Maximum hours allowed per guest pass</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Guest Price per Hour (₱)</label>
+          <input type="number" class="form-control" name="guest_price_per_hour" 
+                 value="{{ settings.get('guest_price_per_hour', 50) }}" min="0" step="10">
+          <small class="form-hint">Hourly rate for guest access</small>
+        </div>
+      </div>
+      <div class="button-group">
+        <button type="submit" class="btn btn-primary">💾 Save</button>
+        <button type="reset" class="btn btn-secondary">🔄 Reset</button>
+      </div>
+    </div>
+
+    <!-- Facility Information Tab -->
+    <div id="facility" class="settings-content">
+      <h5 class="settings-title">Facility Information</h5>
+      <div class="settings-grid">
+        <div class="form-group">
+          <label class="form-label">Facility Name</label>
+          <input type="text" class="form-control" name="facility_name" 
+                 value="{{ settings.facility_name }}" 
+                 placeholder="Smart Locker System" maxlength="100">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Phone Number</label>
+          <input type="tel" class="form-control" name="facility_phone" 
+                 value="{{ settings.facility_phone }}" 
+                 placeholder="+63 (0) 000-0000" maxlength="20">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Email Address</label>
+          <input type="email" class="form-control" name="facility_email" 
+                 value="{{ settings.get('facility_email', '') }}" 
+                 placeholder="info@example.com" maxlength="100">
+        </div>
+
+        <div class="form-group" style="grid-column: 1 / -1;">
+          <label class="form-label">Physical Address</label>
+          <input type="text" class="form-control" name="facility_address" 
+                 value="{{ settings.facility_address }}" 
+                 placeholder="123 Main Street" maxlength="200">
+        </div>
+      </div>
+      <div class="button-group">
+        <button type="submit" class="btn btn-primary">💾 Save</button>
+        <button type="reset" class="btn btn-secondary">🔄 Reset</button>
+      </div>
+    </div>
+
+    <!-- Hardware Configuration Tab -->
+    <div id="hardware" class="settings-content">
+      <h5 class="settings-title">Hardware Configuration</h5>
+      <div class="settings-grid">
+        <div class="form-group">
+          <label class="form-label">Unlock Duration (seconds)</label>
+          <input type="number" class="form-control" name="unlock_duration" 
+                 value="{{ settings.unlock_duration }}" min="1" max="60">
+          <small class="form-hint">How long locker stays unlocked</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">RFID Scan Timeout (seconds)</label>
+          <input type="number" class="form-control" name="rfid_timeout" 
+                 value="{{ settings.rfid_timeout }}" min="1" max="30">
+          <small class="form-hint">Wait time for RFID card scan</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Fingerprint Timeout (seconds)</label>
+          <input type="number" class="form-control" name="fingerprint_timeout" 
+                 value="{{ settings.get('fingerprint_timeout', 10) }}" min="1" max="30">
+          <small class="form-hint">Wait time for fingerprint scan</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Max Failed Attempts</label>
+          <input type="number" class="form-control" name="max_failed_attempts" 
+                 value="{{ settings.get('max_failed_attempts', 3) }}" min="1" max="10">
+          <small class="form-hint">Failed attempts before lockout</small>
+        </div>
+      </div>
+      <div class="button-group">
+        <button type="submit" class="btn btn-primary">💾 Save</button>
+        <button type="reset" class="btn btn-secondary">🔄 Reset</button>
+      </div>
+    </div>
+
+    <!-- Admin Management Tab -->
+    <div id="admin" class="settings-content">
+      <h5 class="settings-title">Admin User Management</h5>
+      
+      <div style="margin-bottom: 1.5rem;">
+        <button type="button" class="btn btn-primary" onclick="openAddAdminModal()">➕ Add Admin</button>
+      </div>
+
+      <!-- Admin List Table -->
+      <div style="overflow-x: auto;">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th style="text-align: center;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="adminList">
+            <tr>
+              <td>admin</td>
+              <td>admin@example.com</td>
+              <td><span class="badge-super">Super Admin</span></td>
+              <td><span class="badge-active">Active</span></td>
+              <td style="text-align: center;">
+                <button type="button" class="btn btn-edit btn-sm" onclick="editAdmin('admin')">✏️ Edit</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </form>
+
+  <!-- Add/Edit Admin Modal -->
+  <div id="adminModal" class="admin-modal">
+    <div style="background-color: white; border-radius: 0.5rem; padding: 2rem; max-width: 500px; width: 90%; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+      <h5 style="margin-top: 0; margin-bottom: 1rem; font-size: 1.1rem; font-weight: 600;">Add New Admin</h5>
+      
+      <form id="adminForm">
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label class="form-label">Username</label>
+          <input type="text" class="form-control" id="adminUsername" placeholder="Enter username" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label class="form-label">Email</label>
+          <input type="email" class="form-control" id="adminEmail" placeholder="Enter email" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1rem;">
+          <label class="form-label">Password</label>
+          <input type="password" class="form-control" id="adminPassword" placeholder="Enter password" required>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 1.5rem;">
+          <label class="form-label">Role</label>
+          <select class="form-control" id="adminRole">
+            <option value="admin">Admin</option>
+            <option value="super_admin">Super Admin</option>
+          </select>
+        </div>
+
+        <div style="display: flex; gap: 1rem;">
+          <button type="button" class="btn btn-primary" onclick="saveAdmin()" style="flex: 1;">✓ Save Admin</button>
+          <button type="button" class="btn btn-secondary" onclick="closeAdminModal()" style="flex: 1;">✕ Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function openAddAdminModal() {
+      document.getElementById('adminModal').classList.add('show');
+      document.getElementById('adminForm').reset();
+      document.querySelector('#adminModal h5').textContent = 'Add New Admin';
+    }
+
+    function closeAdminModal() {
+      document.getElementById('adminModal').classList.remove('show');
+    }
+
+    function editAdmin(username) {
+      document.getElementById('adminModal').classList.add('show');
+      document.querySelector('#adminModal h5').textContent = 'Edit Admin: ' + username;
+      document.getElementById('adminUsername').value = username;
+      document.getElementById('adminPassword').placeholder = 'Leave blank to keep current password';
+      // In production, fetch admin details and populate form
+    }
+
+    function saveAdmin() {
+      const username = document.getElementById('adminUsername').value;
+      const email = document.getElementById('adminEmail').value;
+      const password = document.getElementById('adminPassword').value;
+      const role = document.getElementById('adminRole').value;
+
+      if (!username || !email || !password) {
+        alert('Please fill in all fields');
+        return;
+      }
+
+      // In production, send to backend API
+      console.log('Save admin:', { username, email, role });
+      alert('Admin saved successfully!');
+      closeAdminModal();
+    }
+
+    function deleteAdmin(username) {
+      if (confirm('Are you sure you want to delete admin: ' + username + '?')) {
+        // In production, send DELETE request to backend
+        console.log('Delete admin:', username);
+        alert('Admin deleted successfully!');
+      }
+    }
+
+    // Close modal when clicking outside
+    document.getElementById('adminModal').addEventListener('click', function(e) {
+      if (e.target === this) {
+        closeAdminModal();
+      }
+    });
+  </script>
+{% endblock %}

@@ -1,0 +1,291 @@
+{% extends "layouts/base.html" %}
+{% block title %}Fingerprint Enrollment{% endblock %}
+{% block body %}
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Hide scrollbar but allow scrolling */
+  ::-webkit-scrollbar {
+    display: none;
+  }
+  
+  html, body {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Progress indicator */
+  .enrollment-progress {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 32px;
+    font-size: 12px;
+    color: #7a8fa6;
+  }
+  .progress-step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .progress-step.active {
+    color: #0f6e56;
+    font-weight: 600;
+  }
+  .progress-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #e8eef7;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .progress-step.active .progress-dot {
+    background: #0f6e56;
+    color: #fff;
+  }
+  .progress-sep {
+    width: 8px;
+    height: 2px;
+    background: #e8eef7;
+  }
+  .progress-sep.active {
+    background: #0f6e56;
+  }
+
+  /* Button styles */
+  .btn-secondary {
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1.5px solid #e2e8f0;
+    background: #fff;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #7a8fa6;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .btn-secondary:hover {
+    border-color: #ccd5de;
+    background: #f8f9fb;
+  }
+
+  .btn-secondary:active {
+    transform: scale(0.98);
+  }
+
+  .btn-primary {
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: none;
+    background: #0f6e56;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    width: 100%;
+  }
+
+  .btn-primary:hover {
+    background: #084a37;
+    box-shadow: 0 4px 12px rgba(15, 110, 86, 0.2);
+  }
+
+  .btn-primary:active {
+    transform: scale(0.98);
+  }
+
+  .btn-cancel {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #9aabb8;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 12px;
+    font-family: inherit;
+    transition: color 0.15s ease;
+    padding: 8px 0;
+  }
+
+  .btn-cancel:hover {
+    color: #7a8fa6;
+  }
+
+  /* Enrollment info card */
+  .enrollment-info {
+    background: #f8fbff;
+    border-left: 3px solid #0f6e56;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 1.5rem 0;
+  }
+
+  .enrollment-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    font-size: 13px;
+  }
+
+  .enrollment-info-row:first-child {
+    padding-top: 0;
+  }
+
+  .enrollment-info-row:last-child {
+    padding-bottom: 0;
+  }
+
+  .enrollment-info-label {
+    color: #7a8fa6;
+    font-weight: 600;
+  }
+
+  .enrollment-info-value {
+    color: #1a2d3e;
+    font-weight: 700;
+  }
+
+  /* Mobile responsive */
+  @media (max-width: 480px) {
+    .als-main {
+      padding: 2rem 1rem !important;
+    }
+
+    .enrollment-card {
+      padding: 1.5rem !important;
+    }
+
+    .button-group {
+      flex-direction: column;
+    }
+
+    .button-group button,
+    .button-group a {
+      width: 100% !important;
+    }
+  }
+</style>
+
+<nav class="als-nav">
+  <a href="/" class="als-logo-circle" style="text-decoration:none;">
+    <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" />
+  </a>
+  <span class="als-brand">Fingerprint Enrollment</span>
+</nav>
+
+<main class="als-main" style="align-items:center; padding: 2.5rem 1.5rem;">
+  <div style="width:100%; max-width:680px;">
+    <!-- Progress Indicator -->
+    <div class="enrollment-progress">
+      <div class="progress-step active">
+        <div class="progress-dot">1</div>
+        <span>Register</span>
+      </div>
+      <div class="progress-sep active"></div>
+      <div class="progress-step active">
+        <div class="progress-dot">2</div>
+        <span>Select Locker</span>
+      </div>
+      <div class="progress-sep active"></div>
+      <div class="progress-step active">
+        <div class="progress-dot">3</div>
+        <span>Fingerprint</span>
+      </div>
+    </div>
+
+    <!-- Card -->
+    <div class="enrollment-card" style="background:#fff; border-radius:20px; border:1px solid #e2e8f0; padding:2rem;">
+      <!-- Header with icon -->
+      <div style="display:flex; align-items:center; gap:12px; margin-bottom:1.5rem;">
+        <div style="width:48px; height:48px; border-radius:14px; background:#e8f4f0;
+                    display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
+            <path d="M6 28c0-3 2-6 5-7.5V8c0-2.2 1.8-4 4-4s4 1.8 4 4v12.5c3 1.5 5 4.5 5 7.5" stroke="#0f6e56" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="8" y="17" width="2" height="11" fill="#0f6e56" opacity="0.6"/>
+            <rect x="14" y="17" width="2" height="11" fill="#0f6e56" opacity="0.6"/>
+            <rect x="20" y="17" width="2" height="11" fill="#0f6e56" opacity="0.6"/>
+          </svg>
+        </div>
+        <div>
+          <h1 style="margin:0; font-size:18px; font-weight:800; color:#0f6e56; letter-spacing:0.02em;">
+            Ready to enroll fingerprint
+          </h1>
+          <p style="margin:2px 0 0; font-size:12px; color:#7a8fa6;">
+            Final step of registration
+          </p>
+        </div>
+      </div>
+
+      <!-- Enrollment info -->
+      <div class="enrollment-info">
+        <div class="enrollment-info-row">
+          <span class="enrollment-info-label">Member:</span>
+          <span class="enrollment-info-value">{{ draft["full_name"] }}</span>
+        </div>
+        <div class="enrollment-info-row">
+          <span class="enrollment-info-label">Locker:</span>
+          <span class="enrollment-info-value">{{ (locker["label"] if locker else ("Locker " ~ draft["locker_id"])) }}</span>
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div style="border-top:1px solid #f0f2f5; margin:1.5rem 0;"></div>
+
+      <!-- Instructions -->
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:1.5rem;
+                  background:#fff9f0; border-radius:10px; padding:12px 14px; border-left:3px solid #f59e0b;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;">
+          <circle cx="8" cy="8" r="7" stroke="#f59e0b" stroke-width="1.5"/>
+          <rect x="7.25" y="7" width="1.5" height="5" rx="0.75" fill="#f59e0b"/>
+          <circle cx="8" cy="5" r="0.9" fill="#f59e0b"/>
+        </svg>
+        <p style="margin:0; font-size:12px; color:#a16207; line-height:1.5;">
+          Your registration will be saved only after <strong>fingerprint enrollment succeeds</strong>.
+        </p>
+      </div>
+
+      <!-- Buttons -->
+      <div class="button-group" style="display:flex; gap:12px; flex-direction:column;">
+        <form method="post" action="/user/enroll-fingerprint/complete" style="margin:0;">
+          <button type="submit" class="btn-primary">✓ Finish enrollment</button>
+        </form>
+        <a href="/user/select-locker" class="btn-secondary" style="flex:1; text-decoration:none;">
+          ↻ Change locker
+        </a>
+      </div>
+
+      <!-- Cancel link -->
+      <div style="text-align:center; margin-top:1rem;">
+        <form method="post" action="/user/register/cancel" style="margin:0;">
+          <button type="submit" class="btn-cancel">Cancel registration</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</main>
+
+{% endblock %}
+

@@ -1,0 +1,217 @@
+{% extends "admin/layout/admin.html" %}
+
+{% block admin_title %}Lockers{% endblock %}
+
+{% block admin_extra_head %}
+<style>
+  .kpi-card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 0.5rem; }
+  .kpi-number { font-size: 1.8rem; font-weight: 700; color: var(--brand-blue); }
+  .kpi-label { color: #6c757d; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  
+  .locker-card {
+    border: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    border-radius: 0.5rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+    height: 100%;
+  }
+  .locker-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+  .locker-header {
+    border-bottom: 1px solid #e9ecef;
+    padding: 1rem;
+    background: #f8f9fa;
+  }
+  .locker-status-icon {
+    font-size: 2rem;
+    text-align: center;
+    margin-bottom: 0.75rem;
+  }
+  .locker-info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.65rem 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .locker-info-row:last-child {
+    border-bottom: none;
+  }
+  .locker-label { color: #6c757d; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+  .locker-value { font-size: 0.9rem; font-weight: 500; }
+  .locker-grid {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+</style>
+{% endblock %}
+
+{% block admin_content %}
+  <!-- Header -->
+  <div class="mb-4">
+    <div class="text-muted" style="letter-spacing:0.14em; text-transform:uppercase; font-size:0.75rem;">Admin</div>
+    <h5 class="mb-0">Lockers</h5>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="row g-2 mb-5">
+    <div class="col-6 col-lg-3">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Total Lockers</div>
+          <div class="kpi-number">{{ stats.total }}</div>
+          <small class="text-muted">All units</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Available</div>
+          <div class="kpi-number" style="color: #28a745;">{{ stats.available }}</div>
+          <small class="text-muted">Ready to assign</small>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Occupied</div>
+          <div class="kpi-number" style="color: #dc3545;">{{ stats.occupied }}</div>
+          <small class="text-muted">Object detected</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Locker Grid -->
+  <div class="locker-grid">
+    <div class="row g-4">
+      {% for locker in lockers %}
+    <div class="col-6">
+      <div class="card locker-card">
+        <!-- Locker Header -->
+        <div class="locker-header d-flex justify-content-between align-items-center">
+          <h6 class="mb-0">{{ locker.label }}</h6>
+          {% if locker.assigned_to and locker.assigned_to.type == 'member' %}
+            <span class="badge bg-warning text-dark" style="font-size: 0.7rem;">🔒 reserve</span>
+          {% elif locker.assigned_to and locker.assigned_to.type == 'guest' %}
+            <span class="badge bg-info" style="font-size: 0.7rem;">🎫 guest access</span>
+          {% elif locker.status == 'occupied' %}
+            <span class="badge bg-danger" style="font-size: 0.7rem;">📦 occupied</span>
+          {% elif locker.status == 'available' %}
+            <span class="badge bg-success" style="font-size: 0.7rem;">🔓 available</span>
+          {% else %}
+            <span class="badge bg-secondary" style="font-size: 0.7rem;">{{ locker.status }}</span>
+          {% endif %}
+        </div>
+
+        <!-- Locker Body -->
+        <div class="card-body p-3">
+          {% if locker.assigned_to %}
+            <!-- Assigned Locker Info -->
+            <div class="locker-info-row">
+              <span class="locker-label">Assigned to:</span>
+              <span class="locker-value">{{ locker.assigned_to.name }}</span>
+            </div>
+
+            <div class="locker-info-row">
+              <span class="locker-label">Type:</span>
+              <span>
+                {% if locker.assigned_to.type == 'guest' %}
+                  <span class="badge bg-info" style="font-size: 0.7rem;">guest</span>
+                {% else %}
+                  <span class="badge bg-primary" style="font-size: 0.7rem;">member</span>
+                {% endif %}
+              </span>
+            </div>
+
+            {% if locker.assigned_to.type == 'guest' and locker.assigned_to.expiry_date %}
+            <div class="locker-info-row">
+              <span class="locker-label">Access Until:</span>
+              <span class="locker-value">
+                {% set expiry = locker.assigned_to.expiry_date %}
+                {% if expiry < now.date().isoformat() %}
+                  <span class="text-danger">{{ expiry.replace('T', ' ')[:16] }}</span>
+                  <span class="badge bg-danger" style="font-size: 0.6rem; margin-left: 4px;">expired</span>
+                {% else %}
+                  {{ expiry.replace('T', ' ')[:16] }}
+                {% endif %}
+              </span>
+            </div>
+
+            <div class="locker-info-row">
+              <span class="locker-label">Content:</span>
+              <span>
+                {% if locker.status == 'occupied' %}
+                  <span class="badge bg-danger" style="font-size: 0.7rem;">📦 Occupied</span>
+                {% else %}
+                  <span class="badge bg-success" style="font-size: 0.7rem;">🔓 Empty</span>
+                {% endif %}
+              </span>
+            </div>
+            {% endif %}
+
+            {% if locker.assigned_to.type == 'member' %}
+            <div class="locker-info-row">
+              <span class="locker-label">Status:</span>
+              <span>
+                {% if locker.assigned_to.member_status == 'approved' %}
+                  <span class="badge bg-success" style="font-size: 0.7rem;">approved</span>
+                {% elif locker.assigned_to.member_status == 'pending' %}
+                  <span class="badge bg-warning text-dark" style="font-size: 0.7rem;">pending</span>
+                {% else %}
+                  <span class="badge bg-danger" style="font-size: 0.7rem;">rejected</span>
+                {% endif %}
+              </span>
+            </div>
+
+            <div class="locker-info-row">
+              <span class="locker-label">Payment:</span>
+              <span>
+                {% if locker.assigned_to.payment_status == 'paid' %}
+                  <span class="badge bg-success" style="font-size: 0.7rem;">paid</span>
+                {% else %}
+                  <span class="badge bg-danger" style="font-size: 0.7rem;">unpaid</span>
+                {% endif %}
+              </span>
+            </div>
+            {% endif %}
+
+            <!-- Action Buttons -->
+            <div class="mt-3">
+              {% if locker.assigned_to.type == 'guest' %}
+                <button type="button" class="btn btn-sm btn-danger w-100" 
+                        onclick="showDeleteModal('locker', {'locker_id': '{{ locker.label }}', 'name': '{{ locker.assigned_to.name }}'}, function() {
+                          fetch('{{ url_for('admin.admin_delete_guest', guest_id=locker.assigned_to.id) }}', {method: 'POST'}).then(r => location.reload());
+                        })">
+                  🗑 Free Locker
+                </button>
+              {% else %}
+                <button class="btn btn-sm btn-secondary w-100" disabled>
+                  🔒 Member Assigned
+                </button>
+              {% endif %}
+            </div>
+          {% else %}
+            <!-- Available Locker -->
+            <div class="text-center py-3">
+              {% if locker.status == 'occupied' %}
+                <div class="locker-status-icon">📦</div>
+                <div class="text-danger small font-weight-bold">Object Detected</div>
+                <div class="text-muted small">IR Sensor Active</div>
+              {% else %}
+                <div class="locker-status-icon">🔓</div>
+                <div class="text-success small font-weight-bold">Empty</div>
+                <div class="text-muted small">Ready for assignment</div>
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+    </div>
+  </div>
+{% endblock %}

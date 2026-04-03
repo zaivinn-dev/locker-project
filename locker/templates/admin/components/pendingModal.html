@@ -1,0 +1,147 @@
+<!-- Pending Approval Modal -->
+<div class="modal fade" id="pendingModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+      
+      <!-- Header -->
+      <div class="modal-header" id="pendingModalHeader" style="background: var(--brand-blue); color: white; border: none;">
+        <h5 class="modal-title fw-bold" id="pendingModalTitle">Approve Member</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+
+      <!-- Body -->
+      <div class="modal-body">
+        <!-- Icon -->
+        <div class="text-center mb-4">
+          <div id="pendingIconContainer" style="width: 60px; height: 60px; background: #d4edda; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" style="color: #28a745;">
+              <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Member Info Card -->
+        <div class="card" style="border: 1px solid #e9ecef; border-radius: 0.5rem;">
+          <div class="card-body">
+            <div class="mb-3">
+              <label class="text-muted small fw-bold" style="letter-spacing: 0.05em; text-transform: uppercase;">Member Name</label>
+              <p id="pendingName" class="mb-0 fw-bold" style="font-size: 1.1rem;"></p>
+            </div>
+
+            <hr class="my-3" />
+
+            <div class="row">
+              <div class="col-6">
+                <label class="text-muted small fw-bold" style="letter-spacing: 0.05em; text-transform: uppercase;">Category</label>
+                <p id="pendingCategory" class="mb-0" style="font-size: 0.9rem;"></p>
+              </div>
+              <div class="col-6">
+                <label class="text-muted small fw-bold" style="letter-spacing: 0.05em; text-transform: uppercase;">Payment Status</label>
+                <p id="pendingPaymentStatus" class="mb-0" style="font-size: 0.9rem;"></p>
+              </div>
+            </div>
+
+            <hr class="my-3" />
+
+            <!-- Approval Details -->
+            <div id="approvalDetails" class="alert alert-success d-flex gap-2" style="background: #d4edda; border: 1px solid #c3e6cb; color: #155724; border-radius: 0.25rem; margin-bottom: 0; display: none;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink: 0; margin-top: 0.1rem;">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/>
+              </svg>
+              <div>
+                <strong>Upon Approval:</strong>
+                <p id="pendingApprovalDetail" class="mb-0 mt-1" style="font-size: 0.9rem;"></p>
+              </div>
+            </div>
+
+            <!-- Rejection Details -->
+            <div id="rejectionDetails" class="alert alert-danger d-flex gap-2" style="background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; border-radius: 0.25rem; margin-bottom: 0; display: none;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink: 0; margin-top: 0.1rem;">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+              </svg>
+              <div>
+                <strong>Upon Rejection:</strong>
+                <p id="pendingRejectionDetail" class="mb-0 mt-1" style="font-size: 0.9rem;"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="modal-footer" style="border-top: 1px solid #e9ecef;">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="confirmPendingBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;">
+            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+          </svg>
+          Confirm
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  /**
+   * Show pending approval confirmation modal
+   * @param {object} data - Data object with id, name, category, payment_status
+   * @param {string} action - 'approve' or 'reject'
+   * @param {function} callback - Callback function to execute on confirm
+   */
+  function showPendingModal(data, action, callback) {
+    const modal = document.getElementById('pendingModal');
+    const header = document.getElementById('pendingModalHeader');
+    const title = document.getElementById('pendingModalTitle');
+    const iconContainer = document.getElementById('pendingIconContainer');
+    const confirmBtn = document.getElementById('confirmPendingBtn');
+    const approvalDetails = document.getElementById('approvalDetails');
+    const rejectionDetails = document.getElementById('rejectionDetails');
+
+    // Set common info
+    document.getElementById('pendingName').textContent = data.name || 'Member';
+    document.getElementById('pendingCategory').textContent = data.category || '-';
+    document.getElementById('pendingPaymentStatus').textContent = data.payment_status || 'unpaid';
+
+    if (action === 'approve') {
+      // Approval styling
+      header.style.background = '#28a745';
+      title.textContent = 'Approve Member';
+      iconContainer.style.background = '#d4edda';
+      iconContainer.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" style="color: #28a745;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>';
+      
+      approvalDetails.style.display = 'block';
+      rejectionDetails.style.display = 'none';
+      document.getElementById('pendingApprovalDetail').textContent = 'Member will be approved. An available locker will be automatically assigned. They can begin using their fingerprint to access the locker.';
+      
+      confirmBtn.className = 'btn btn-success';
+      confirmBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/></svg>Approve Member';
+    } else {
+      // Rejection styling
+      header.style.background = '#dc3545';
+      title.textContent = 'Reject Member';
+      iconContainer.style.background = '#f8d7da';
+      iconContainer.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" style="color: #dc3545;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>';
+      
+      approvalDetails.style.display = 'none';
+      rejectionDetails.style.display = 'block';
+      document.getElementById('pendingRejectionDetail').textContent = 'Member application will be rejected. They will be notified and can reapply later if they wish.';
+      
+      confirmBtn.className = 'btn btn-danger';
+      confirmBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 0.5rem;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>Reject Member';
+    }
+
+    // Handle confirm button
+    confirmBtn.onclick = () => {
+      const bootstrapModal = bootstrap.Modal.getInstance(modal);
+      bootstrapModal.hide();
+      if (callback && typeof callback === 'function') {
+        callback();
+      }
+    };
+
+    const bootstrapModal = new bootstrap.Modal(modal);
+    bootstrapModal.show();
+  }
+</script>

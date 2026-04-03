@@ -1,0 +1,194 @@
+{% extends "layouts/base.html" %}
+{% block title %}Select Locker{% endblock %}
+{% block body %}
+
+<style>
+  /* Responsive card grid */
+  .als-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+  }
+
+  @media (min-width: 480px) {
+    .als-cards {
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    }
+  }
+
+  @media (min-width: 768px) {
+    .als-cards {
+      grid-template-columns: repeat(5, 1fr);
+      gap: 20px;
+    }
+  }
+
+  .als-card {
+    transition: all 0.2s ease;
+    border-radius: 8px;
+    border: 2px solid #e8eef7;
+    aspect-ratio: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Available locker - selectable */
+  .als-card.available {
+    background: #fff;
+  }
+
+  .als-card.available:hover {
+    border-color: #0f6e56;
+    box-shadow: 0 4px 12px rgba(15, 110, 86, 0.15);
+    transform: translateY(-2px);
+  }
+
+  .als-card.available:active {
+    transform: translateY(0);
+  }
+
+  /* Occupied locker - disabled */
+  .als-card.occupied {
+    background: #f5f7fa;
+    opacity: 0.6;
+    cursor: not-allowed;
+    border-color: #d1d8e0;
+  }
+
+  .als-card.occupied:hover {
+    border-color: #d1d8e0;
+    box-shadow: none;
+    transform: none;
+  }
+
+  /* Status badge */
+  .locker-status-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    z-index: 2;
+  }
+
+  .locker-status-badge.available {
+    background: #d1fae5;
+    color: #065f46;
+  }
+
+  .locker-status-badge.occupied {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+
+  /* Mobile responsive header */
+  @media (max-width: 480px) {
+    .enrollment-header {
+      flex-direction: column;
+      align-items: flex-start !important;
+      gap: 12px !important;
+    }
+    .btn-back-mobile {
+      width: 100%;
+      justify-content: center;
+    }
+    .als-main {
+      padding: 2rem 1rem !important;
+    }
+  }
+</style>
+
+<nav class="als-nav">
+  <a href="/" class="als-logo-circle" style="text-decoration:none;">
+    <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" />
+  </a>
+  <span class="als-brand">Select Locker</span>
+</nav>
+
+<main class="als-main" style="padding: 2.5rem 1.5rem;">
+  <div style="width:100%; max-width:920px;">
+    <div class="enrollment-header" style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px;">
+      <div>
+        <p class="als-section-label" style="text-align:left; margin-bottom:6px;">Choose a locker</p>
+        <h1 style="margin:0; font-size:20px; font-weight:800; color:#1a2d3e; letter-spacing:0.02em;">
+          {{ draft["full_name"] }}
+        </h1>
+        <p style="margin:4px 0 0; font-size:13px; color:#7a8fa6;">
+          Select a locker before fingerprint enrollment.
+        </p>
+      </div>
+      <a href="/" class="btn-brand btn-back-mobile" style="text-decoration:none; display:inline-flex; align-items:center; padding: 8px 16px; border: 2px solid #e8eef7; border-radius: 6px; transition: all 0.2s ease;">← Back</a>
+    </div>
+
+    <!-- Status legend -->
+    <div style="display:flex; gap:20px; margin:20px 0 24px; font-size:12px; color:#7a8fa6;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:20px; height:20px; border-radius:50%; background:#d1fae5; display:flex; align-items:center; justify-content:center; color:#065f46; font-weight:700;">✓</div>
+        <span>Available</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:20px; height:20px; border-radius:50%; background:#fee2e2; display:flex; align-items:center; justify-content:center; color:#991b1b; font-weight:700;">✗</div>
+        <span>Occupied</span>
+      </div>
+    </div>
+
+    <div class="als-cards">
+      {% for l in lockers %}
+        <form method="post" action="/user/select-locker" style="margin:0;">
+          <input type="hidden" name="locker_id" value="{{ l['id'] }}" />
+          {% if l['status'] == 'available' and not l['assignment_status'] %}
+            <button type="submit" class="als-card als-card--member available" style="background:#fff; border: none; padding: 0;">
+              <div class="locker-status-badge available">✓</div>
+              <div class="als-card-icon">
+                <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                  <rect x="7" y="4" width="18" height="24" rx="4" fill="#9fe1cb"/>
+                  <rect x="10" y="8" width="12" height="2.6" rx="1.3" fill="#0f6e56"/>
+                  <rect x="10" y="13" width="10" height="2.6" rx="1.3" fill="#0f6e56" opacity="0.7"/>
+                  <rect x="10" y="18" width="8"  height="2.6" rx="1.3" fill="#0f6e56" opacity="0.5"/>
+                </svg>
+              </div>
+              <div>
+                <div class="als-card-label" style="color:#0f6e56;">{{ l["label"] }}</div>
+                <div class="als-card-sub">Tap to select</div>
+              </div>
+            </button>
+          {% else %}
+            <button type="button" disabled class="als-card als-card--member occupied" style="background:#f5f7fa; border: none; padding: 0;">
+              <div class="locker-status-badge occupied">✗</div>
+              <div class="als-card-icon" style="opacity: 0.7;">
+                <svg width="34" height="34" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                  <rect x="7" y="4" width="18" height="24" rx="4" fill="#c5cad1"/>
+                  <rect x="10" y="8" width="12" height="2.6" rx="1.3" fill="#7a8fa6"/>
+                  <rect x="10" y="13" width="10" height="2.6" rx="1.3" fill="#7a8fa6" opacity="0.7"/>
+                  <rect x="10" y="18" width="8"  height="2.6" rx="1.3" fill="#7a8fa6" opacity="0.5"/>
+                </svg>
+              </div>
+              <div>
+                <div class="als-card-label" style="color:#9aabb8;">{{ l["label"] }}</div>
+                <div class="als-card-sub" style="color:#bcc5d0;">
+                  {% if l['assignment_status'] == 'member_assigned' %}
+                    Reserved
+                  {% elif l['assignment_status'] == 'guest_assigned' %}
+                    Guest Access
+                  {% else %}
+                    Occupied
+                  {% endif %}
+                </div>
+              </div>
+            </button>
+          {% endif %}
+        </form>
+      {% endfor %}
+    </div>
+  </div>
+</main>
+
+{% endblock %}
+

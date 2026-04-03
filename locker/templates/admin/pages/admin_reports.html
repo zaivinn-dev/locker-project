@@ -1,0 +1,185 @@
+{% extends "admin/layout/admin.html" %}
+
+{% block admin_extra_head %}
+<style>
+  .kpi-card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 0.5rem; }
+  .kpi-number { font-size: 2rem; font-weight: 700; color: var(--brand-blue); }
+  .kpi-label { color: #6c757d; font-size: 0.85rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  .chart-wrapper { max-height: 280px; overflow-y: auto; }
+</style>
+{% endblock %}
+
+{% block admin_content %}
+  <!-- Header -->
+  <div class="mb-4 d-flex justify-content-between align-items-start">
+    <div>
+      <div class="text-muted" style="letter-spacing:0.14em; text-transform:uppercase; font-size:0.75rem;">Admin</div>
+      <h5 class="mb-0">Reports & Analytics</h5>
+    </div>
+    <div class="d-flex gap-2">
+      <a href="/admin/reports/export-pdf" class="btn btn-outline-primary btn-sm" title="Export as PDF">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline; margin-right:0.25rem; vertical-align:middle;">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="13" x2="12" y2="17"/><polyline points="9 16 12 13 15 16"/>
+        </svg>
+        PDF
+      </a>
+      <a href="/admin/reports/export-csv" class="btn btn-outline-success btn-sm" title="Export as CSV">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline; margin-right:0.25rem; vertical-align:middle;">
+          <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+        </svg>
+        CSV
+      </a>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-lg-3">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Total Members</div>
+          <div class="kpi-number">{{ stats.total_members }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Total Guests</div>
+          <div class="kpi-number">{{ stats.total_guests }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Approved</div>
+          <div class="kpi-number">{{ stats.approved_members }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Revenue</div>
+          <div class="kpi-number" style="font-size: 1.5rem;">₱{{ "{:,}".format(stats.total_revenue) }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Revenue & Activity Row -->
+  <div class="row g-3 mb-4">
+    <div class="col-lg-6">
+      <div class="card shadow-sm rounded-3">
+        <div class="card-body">
+          <h6 class="card-title mb-3">Monthly Revenue (Last 30 Days)</h6>
+          <div class="mb-3">
+            <div class="display-6" style="color: #28a745; font-weight: 700;">₱{{ "{:,}".format(stats.monthly_revenue) }}</div>
+            <small class="text-muted">{{ stats.monthly_access_count }} payment(s) recorded</small>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card shadow-sm rounded-3">
+        <div class="card-body">
+          <h6 class="card-title mb-3">Total Access Events</h6>
+          <div class="mb-3">
+            <div class="display-6" style="color: var(--brand-blue); font-weight: 700;">{{ stats.total_access_logs }}</div>
+            <small class="text-muted">All system events logged</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Data Tables Row -->
+  <div class="row g-3 mb-4">
+    <!-- Top Actions -->
+    <div class="col-lg-6">
+      <div class="card shadow-sm rounded-3">
+        <div class="card-body">
+          <h6 class="card-title mb-3">Top Actions (All Time)</h6>
+          <div class="chart-wrapper">
+            {% if top_actions %}
+              <table class="table table-sm mb-0">
+                <tbody>
+                  {% for action in top_actions %}
+                  <tr>
+                    <td style="font-size: 0.85rem;">
+                      <span class="badge bg-secondary">{{ action['action']|replace('_', ' ')|title }}</span>
+                    </td>
+                    <td class="text-end fw-bold text-muted" style="font-size: 0.85rem;">{{ action['c'] }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <p class="text-muted mb-0">No data yet</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Access by Type -->
+    <div class="col-lg-6">
+      <div class="card shadow-sm rounded-3">
+        <div class="card-body">
+          <h6 class="card-title mb-3">Access by Type (Last 7 Days)</h6>
+          <div class="chart-wrapper">
+            {% if access_by_type %}
+              <table class="table table-sm mb-0">
+                <tbody>
+                  {% for entry in access_by_type %}
+                  <tr>
+                    <td style="font-size: 0.85rem;">
+                      {% if entry['actor_type'] == 'member' %}
+                        <span class="badge bg-primary">Member</span>
+                      {% elif entry['actor_type'] == 'guest' %}
+                        <span class="badge bg-info">Guest</span>
+                      {% elif entry['actor_type'] == 'device' %}
+                        <span class="badge bg-success">Device</span>
+                      {% elif entry['actor_type'] == 'admin' %}
+                        <span class="badge bg-warning text-dark">Admin</span>
+                      {% else %}
+                        <span class="badge bg-secondary">{{ entry['actor_type']|title }}</span>
+                      {% endif %}
+                    </td>
+                    <td class="text-end fw-bold text-muted" style="font-size: 0.85rem;">{{ entry['c'] }}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <p class="text-muted mb-0">No data for the last 7 days</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary Card -->
+  <div class="card shadow-sm rounded-3" style="background: linear-gradient(135deg, #{0}4 0%, rgba(255,255,255,0) 100%); border: 1px solid #e9ecef;">
+    <div class="card-body">
+      <div class="d-flex gap-3">
+        <div style="flex-shrink: 0;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--brand-blue)" stroke-width="2">
+            <path d="M3 3v18h18"/>
+            <path d="M3 15h6v6H3z"/>
+            <path d="M12 9h6v12h-6z"/>
+          </svg>
+        </div>
+        <div>
+          <h6 class="mb-2">Summary</h6>
+          <p class="mb-0 text-muted" style="font-size: 0.9rem;">
+            <strong>{{ stats.total_members }}</strong> registered members and <strong>{{ stats.total_guests }}</strong> guest accesses.
+            <strong>{{ stats.approved_members }}</strong> members are approved and paid. Monthly revenue: <strong>₱{{ "{:,}".format(stats.monthly_revenue) }}</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

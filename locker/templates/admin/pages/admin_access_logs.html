@@ -1,0 +1,141 @@
+{% extends "admin/layout/admin.html" %}
+
+{% block admin_title %}Access Logs{% endblock %}
+
+{% block admin_extra_head %}
+<style>
+  .table th {
+    background-color: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+    font-weight: 600;
+    color: #495057;
+  }
+  .table td {
+    vertical-align: middle;
+  }
+  .badge-member { background-color: #d4edda; color: #155724; }
+  .badge-admin { background-color: #cce5ff; color: #004085; }
+  .badge-system { background-color: #fff3cd; color: #856404; }
+  .badge-device { background-color: #f8d7da; color: #721c24; }
+  
+  .access-logs-wrapper {
+    max-height: 600px;
+    overflow-y: auto;
+  }
+</style>
+{% endblock %}
+
+{% block admin_content %}
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <div class="text-muted" style="letter-spacing:0.14em; text-transform:uppercase; font-size:0.75rem;">Admin</div>
+      <h5 class="mb-0">Access Logs</h5>
+    </div>
+    <div class="d-flex gap-2">
+      <a href="{{ url_for('admin.export_access_logs_csv') }}" class="btn btn-sm btn-outline-success">
+        <i class="bi bi-file-earmark-csv"></i> CSV
+      </a>
+      <a href="{{ url_for('admin.export_access_logs_pdf') }}" class="btn btn-sm btn-outline-danger">
+        <i class="bi bi-file-earmark-pdf"></i> PDF
+      </a>
+    </div>
+  </div>
+
+  <!-- Filter Form -->
+  <div class="card shadow-sm rounded-3 mb-4">
+    <div class="card-body">
+      <form method="get" action="/admin/access-logs" class="d-flex gap-2 flex-wrap align-items-end">
+        <div class="flex-grow-1" style="min-width: 200px;">
+          <label class="form-label small fw-bold">Search</label>
+          <input name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="Search by name, action..." />
+        </div>
+        
+        <div style="min-width: 150px;">
+          <label class="form-label small fw-bold">Actor Type</label>
+          <select name="actor_type" class="form-select form-select-sm">
+            <option value="">All Types</option>
+            {% for at in actor_types %}
+              <option value="{{ at['actor_type'] }}" {% if actor_type == at['actor_type'] %}selected{% endif %}>{{ at['actor_type']|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        
+        <div style="min-width: 150px;">
+          <label class="form-label small fw-bold">Action</label>
+          <select name="action" class="form-select form-select-sm">
+            <option value="">All Actions</option>
+            {% for a in actions %}
+              <option value="{{ a['action'] }}" {% if action == a['action'] %}selected{% endif %}>{{ a['action']|replace('_', ' ')|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-primary" type="submit">Filter</button>
+          {% if q or actor_type or action %}
+            <a href="/admin/access-logs" class="btn btn-sm btn-outline-secondary">Clear</a>
+          {% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Logs Table -->
+  <div class="card shadow-sm rounded-3">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 class="card-title mb-0">System Access Logs</h6>
+        <span class="text-muted small">Latest {{ limit }} entries</span>
+      </div>
+      
+      <div class="access-logs-wrapper table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+          <thead class="position-sticky" style="top: 0; background: white; z-index: 10;">
+            <tr>
+              <th style="width: 60px;">ID</th>
+              <th style="width: 150px;">Timestamp</th>
+              <th style="width: 100px;">Actor</th>
+              <th style="width: 130px;">Action</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in logs %}
+              <tr>
+                <td class="text-muted small">{{ log["id"] }}</td>
+                <td class="text-muted small" style="white-space: nowrap;">
+                  {{ log["created_at"]|default("-") }}
+                </td>
+                <td>
+                  <span class="badge badge-{{ log['actor_type']|lower }} px-2 py-1" style="font-size: 0.75rem;">
+                    {{ log["actor_type"]|title }}
+                  </span>
+                  {% if log["actor_name"] and log["actor_name"] != "N/A" %}
+                    <br/>
+                    <small class="text-muted d-block mt-1">{{ log["actor_name"] }}</small>
+                  {% endif %}
+                </td>
+                <td>
+                  <span class="badge bg-secondary px-2 py-1" style="font-size: 0.75rem;">
+                    {{ log["action"]|replace("_", " ")|title }}
+                  </span>
+                </td>
+                <td class="text-muted small">
+                  {% if log["detail"] %}
+                    <span style="word-break: break-word;">{{ log["detail"] }}</span>
+                  {% else %}
+                    <em>—</em>
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5" class="text-center text-muted py-4">No access logs found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+

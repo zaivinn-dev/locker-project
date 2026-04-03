@@ -1,0 +1,554 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Access Locker System{% endblock %}</title>
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --brand-blue:   #1a3a5c;
+        --brand-teal:   #0f6e56;
+        --brand-accent: #378add;
+        --brand-light:  #f4f6f9;
+        --brand-white:  #ffffff;
+      }
+
+      *, *::before, *::after { box-sizing: border-box; }
+
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      /* Hide scrollbar visually but allow scrolling */
+      ::-webkit-scrollbar {
+        display: none;
+      }
+
+      html, body {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+
+      body {
+        font-family: 'Syne', sans-serif;
+        background: var(--brand-light);
+        color: #1a2d3e;
+        font-size: 16px;
+      }
+
+      /* ── Responsive Typography ─────────────────────────────────── */
+      @media (max-width: 1024px) {
+        body { font-size: 15px; }
+      }
+
+      @media (max-width: 768px) {
+        body { font-size: 14px; }
+        h1 { font-size: 1.5rem !important; }
+        h2 { font-size: 1.3rem !important; }
+        h3 { font-size: 1.15rem !important; }
+        h4 { font-size: 1.05rem !important; }
+        h5 { font-size: 1rem !important; }
+        h6 { font-size: 0.95rem !important; }
+      }
+
+      @media (max-width: 480px) {
+        body { font-size: 13px; }
+        h1 { font-size: 1.3rem !important; }
+        h2 { font-size: 1.1rem !important; }
+        h3 { font-size: 1rem !important; }
+        h4 { font-size: 0.95rem !important; }
+        h5 { font-size: 0.9rem !important; }
+        h6 { font-size: 0.85rem !important; }
+        .small, small, .text-muted { font-size: 0.7rem !important; }
+      }
+
+      /* ── Navbar ─────────────────────────────────── */
+      .als-nav {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 16px 20px;
+        background: var(--brand-blue);
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        flex-wrap: wrap;
+      }
+      .als-logo-circle {
+        width: 42px; height: 42px;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+      }
+      .als-logo-circle img {
+        width: 70px; height: 70px;
+        object-fit: contain;
+      }
+      .als-brand {
+        font-size: 15px;
+        font-weight: 700;
+        color: #fff;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      /* ── Responsive Navbar ─────────────────────────────────── */
+      @media (max-width: 768px) {
+        .als-nav {
+          padding: 12px 15px;
+          gap: 10px;
+          gap: 10px;
+        }
+        .als-logo-circle {
+          width: 36px;
+          height: 36px;
+        }
+        .als-logo-circle img {
+          width: 55px;
+          height: 55px;
+        }
+        .als-brand {
+          font-size: 12px;
+          letter-spacing: 0.04em;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .als-nav {
+          padding: 10px 12px;
+          gap: 8px;
+        }
+        .als-logo-circle {
+          width: 32px;
+          height: 32px;
+        }
+        .als-logo-circle img {
+          width: 48px;
+          height: 48px;
+        }
+        .als-brand {
+          font-size: 10px;
+          letter-spacing: 0.02em;
+        }
+      }
+
+      /* ── Buttons ─────────────────────────────────── */
+      .btn-brand {
+        background: var(--brand-accent);
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 10px 22px;
+        font-family: 'Syne', sans-serif;
+        font-weight: 700;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: background 0.15s;
+      }
+      .btn-brand:hover { background: #185fa5; color: #fff; }
+
+      /* ── Cards ───────────────────────────────────── */
+      .als-card {
+        width: 210px; height: 210px;
+        background: var(--brand-white);
+        border-radius: 20px;
+        border: 1px solid #e2e8f0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        text-decoration: none;
+        cursor: pointer;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        position: relative;
+        overflow: hidden;
+      }
+      .als-card::before {
+        content: ''; position: absolute; inset: 0; opacity: 0;
+        transition: opacity 0.18s;
+        pointer-events: none;
+      }
+      .als-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 32px rgba(26,58,92,0.13);
+        border-color: #b8cfe8;
+      }
+      .als-card:hover::before { opacity: 1; }
+
+      .als-card--register::before { background: linear-gradient(135deg, #e8f4fd 0%, #fff 60%); }
+      .als-card--member::before   { background: linear-gradient(135deg, #edfaf5 0%, #fff 60%); }
+
+      .als-card-icon {
+        width: 64px; height: 64px;
+        border-radius: 16px;
+        display: flex; align-items: center; justify-content: center;
+        position: relative; z-index: 1;
+      }
+      .als-card--register .als-card-icon { background: #e8f4fd; }
+      .als-card--member   .als-card-icon { background: #edfaf5; }
+
+      .als-card-label {
+        font-size: 11px; font-weight: 700;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        text-align: center;
+        line-height: 1.5;
+        position: relative; z-index: 1;
+      }
+      .als-card--register .als-card-label { color: var(--brand-blue); }
+      .als-card--member   .als-card-label { color: var(--brand-teal); }
+
+      .als-card-sub {
+        font-size: 11px;
+        color: #9aabb8;
+        letter-spacing: 0.04em;
+        position: relative; z-index: 1;
+        margin-top: 10px;
+      }
+
+      /* ── Main content area ───────────────────────── */
+      .als-main {
+        min-height: calc(100vh - 70px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 2rem;
+        padding: 3rem 1.5rem;
+      }
+      .als-section-label {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #9aabb8;
+        text-align: center;
+        margin: 0;
+      }
+      .als-cards {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        justify-content: center;
+      }
+
+      /* ── RESPONSIVE DESIGN ────────────────────────── */
+      /* Mobile (< 576px) */
+      @media (max-width: 575px) {
+        .als-nav {
+          padding: 12px 16px;
+          gap: 10px;
+        }
+        .als-brand {
+          font-size: 12px;
+        }
+        .als-logo-circle {
+          width: 32px;
+          height: 32px;
+        }
+        .als-logo-circle img {
+          width: 50px;
+          height: 50px;
+        }
+        .als-main {
+          padding: 1.5rem 1rem;
+          gap: 1.5rem;
+        }
+        .als-card {
+          width: 140px;
+          height: 140px;
+          gap: 12px;
+        }
+        .als-card-icon {
+          width: 48px;
+          height: 48px;
+        }
+        .als-card-label {
+          font-size: 9px;
+        }
+        .als-card-sub {
+          font-size: 9px;
+        }
+        .btn-brand {
+          padding: 8px 16px;
+          font-size: 11px;
+        }
+      }
+
+      /* Tablet (576px - 768px) */
+      @media (min-width: 576px) and (max-width: 768px) {
+        .als-nav {
+          padding: 16px 24px;
+          gap: 12px;
+        }
+        .als-brand {
+          font-size: 13px;
+        }
+        .als-logo-circle {
+          width: 36px;
+          height: 36px;
+        }
+        .als-logo-circle img {
+          width: 60px;
+          height: 60px;
+        }
+        .als-main {
+          padding: 2rem 1.25rem;
+          gap: 1.75rem;
+        }
+        .als-card {
+          width: 170px;
+          height: 170px;
+          gap: 14px;
+        }
+        .als-card-icon {
+          width: 56px;
+          height: 56px;
+        }
+        .als-card-label {
+          font-size: 10px;
+        }
+        .als-card-sub {
+          font-size: 10px;
+        }
+        .btn-brand {
+          padding: 9px 20px;
+          font-size: 12px;
+        }
+      }
+
+      /* Laptop/Desktop (> 768px) */
+      @media (min-width: 769px) {
+        .als-nav {
+          padding: 20px 40px;
+        }
+        .als-brand {
+          font-size: 15px;
+        }
+        .als-logo-circle {
+          width: 42px;
+          height: 42px;
+        }
+        .als-logo-circle img {
+          width: 70px;
+          height: 70px;
+        }
+        .als-main {
+          padding: 3rem 1.5rem;
+          gap: 2rem;
+        }
+        .als-card {
+          width: 210px;
+          height: 210px;
+          gap: 16px;
+        }
+        .als-card-icon {
+          width: 64px;
+          height: 64px;
+        }
+        .als-card-label {
+          font-size: 11px;
+        }
+        .als-card-sub {
+          font-size: 11px;
+        }
+        .btn-brand {
+          padding: 10px 22px;
+          font-size: 13px;
+        }
+      }
+
+      /* ── Touch-Friendly Elements ────────────────────────── */
+      /* Buttons */
+      .btn, .btn-primary, .btn-secondary, .btn-danger, .btn-outline-danger {
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.2s ease;
+        font-size: 0.95rem;
+      }
+
+      @media (max-width: 768px) {
+        .btn, .btn-sm, .btn-primary, .btn-secondary, .btn-danger {
+          min-height: 42px !important; 
+          min-width: 42px !important;
+          padding: 10px 14px !important;
+          font-size: 0.9rem !important;
+        }
+
+        .btn-lg {
+          min-height: 48px !important;
+          font-size: 1rem !important;
+          padding: 12px 20px !important;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .btn, .btn-sm {
+          width: 100%;
+          margin-bottom: 8px;
+          min-height: 44px !important;
+          font-size: 0.85rem !important;
+        }
+      }
+
+      /* Forms */
+      .form-control, .form-select, input[type="text"], input[type="email"], input[type="password"], textarea {
+        border-radius: 8px;
+        font-size: 0.95rem;
+        border: 1px solid #d0d8dd;
+      }
+
+      @media (max-width: 768px) {
+        .form-control, .form-select, input[type="text"], input[type="email"], input[type="password"], textarea {
+          min-height: 42px;
+          font-size: 16px !important;
+          padding: 10px 12px !important;
+        }
+
+        label {
+          font-size: 0.9rem;
+          margin-bottom: 6px;
+        }
+      }
+
+      /* Tables */
+      .table {
+        font-size: 0.9rem;
+      }
+
+      @media (max-width: 768px) {
+        .table {
+          font-size: 0.8rem;
+        }
+
+        .table th {
+          padding: 8px 4px !important;
+            font-size: 0.75rem !important;
+        }
+
+        .table td {
+          padding: 6px 4px !important;
+          font-size: 0.75rem !important;
+        }
+
+        /* Responsive table wrapper */
+        .table-responsive {
+          min-height: auto;
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .table {
+          font-size: 0.7rem;
+        }
+
+        .table th {
+          padding: 6px 3px !important;
+          font-size: 0.65rem !important;
+        }
+
+        .table td {
+          padding: 4px 3px !important;
+          font-size: 0.65rem !important;
+        }
+
+        /* Hide less important columns on small screens */
+        .table .d-none-mobile {
+          display: none;
+        }
+      }
+
+      /* Modals - Touch friendly */
+      @media (max-width: 768px) {
+        .modal-dialog {
+          width: 90vw !important;
+          max-width: 90vw !important;
+          margin: auto;
+        }
+
+        .modal-body {
+          padding: 16px !important;
+        }
+
+        .modal-header {
+          padding: 12px 16px !important;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .modal-dialog {
+          width: 95vw !important;
+          max-width: 95vw !important;
+        }
+      }
+
+      /* Cards - Responsive spacing */
+      .card {
+        border-radius: 12px;
+        border: 1px solid #e2e8f0;
+      }
+
+      @media (max-width: 768px) {
+        .card {
+          margin-bottom: 12px;
+        }
+
+        .card-body {
+          padding: 12px !important;
+        }
+      }
+
+      @media (max-width: 480px) {
+        .card {
+          margin-bottom: 8px;
+        }
+
+        .card-body {
+          padding: 8px !important;
+        }
+      }
+
+      /* Badge sizing */
+      .badge {
+        padding: 4px 8px;
+        font-size: 0.75rem;
+      }
+
+      @media (max-width: 768px) {
+        .badge {
+          padding: 3px 6px;
+          font-size: 0.65rem;
+        }
+      }
+
+      /* 7-inch touch screen optimization */
+      @media (min-device-width: 600px) and (max-device-width: 900px) and (orientation: portrait) {
+        body, html {
+          font-size: 15px;
+        }
+
+        .btn, .form-control {
+          min-height: 44px;
+        }
+
+        .table { font-size: 0.85rem; }
+      }
+    </style>
+    {% block extra_head %}{% endblock %}
+  </head>
+  <body>
+    {% block body %}{% endblock %}
+    <script src="{{ url_for('static', filename='js/bootstrap.bundle.min.js') }}"></script>
+    {% block extra_js %}{% endblock %}
+  </body>
+</html>
+

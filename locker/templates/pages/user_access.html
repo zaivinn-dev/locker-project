@@ -1,0 +1,49 @@
+{% extends "layouts/base.html" %}
+{% block title %}Member Access{% endblock %}
+{% block body %}
+
+<nav class="als-nav">
+  <a href="/" class="als-logo-circle" style="text-decoration:none;">
+    <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" />
+  </a>
+  <span class="als-brand">Member Access</span>
+</nav>
+
+<main class="als-main" style="align-items:center; padding: 2.5rem 1.5rem;">
+  <div style="width:100%; max-width:520px; text-align:center;">
+
+    <!-- Header -->
+    <div style="display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:2rem;">
+      <div style="width:48px; height:48px; border-radius:14px; background:#edfaf5;
+                  display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="11" r="5.5" fill="#0f6e56"/>
+          <path d="M7 28c0-5 4-9 9-9s9 4 9 9" stroke="#0f6e56" stroke-width="2" stroke-linecap="round" fill="none"/>
+        </svg>
+      </div>
+      <h1 style="margin:0; font-size:20px; font-weight:800; color:#1a2d3e; letter-spacing:0.02em;">Member Access</h1>
+    </div>
+
+    <!-- Card -->
+    <div style="background:#fff; border-radius:20px; border:1px solid #e2e8f0; padding:2rem;">
+      <p style="margin:0; font-size:14px; color:#7a8fa6; line-height:1.6;">
+        This screen will guide members through fingerprint authentication and locker access.
+        We will connect this to the R307 and ESP32 later.
+      </p>
+
+      <!-- Back button -->
+      <button type="button" onclick="window.location.href='/'"
+              style="margin-top:1.5rem; width:100%; padding:13px; border-radius:12px; border:1.5px solid #e2e8f0;
+                     background:#fff; font-family:inherit; font-size:13px; font-weight:700;
+                     letter-spacing:0.08em; text-transform:uppercase; color:#7a8fa6;
+                     cursor:pointer; transition:background 0.15s, border-color 0.15s;"
+              onmouseover="this.style.background='#f4f6f9';this.style.borderColor='#ccd5de'"
+              onmouseout="this.style.background='#fff';this.style.borderColor='#e2e8f0'">
+        ← Back to Home
+      </button>
+    </div>
+  </div>
+</main>
+
+{% endblock %}
+
