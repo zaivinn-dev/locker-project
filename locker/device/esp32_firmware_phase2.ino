@@ -84,9 +84,8 @@ unsigned long lastScanPermissionCheck = 0;
 const unsigned long SCAN_PERMISSION_POLL_INTERVAL = 1000;  // Check scan enable state every 1 second
 
 // Smart Auto-Lock Tracking
-int unlockedLocker = -1;  // Which locker is currently unlocked (-1 = none)
-unsigned long unlockedTime = 0;  // When was it unlocked (reference point from door opening)
-bool isLockerUnlocked = false;  // Is the relay currently in unlocked state
+bool lockerUnlocked[4] = {false, false, false, false};  // Relay unlocked state per locker
+unsigned long lockerUnlockTime[4] = {0, 0, 0, 0};  // Time when each locker was unlocked
 const unsigned long AUTO_LOCK_DELAY = 6000;  // 20 seconds from door UNLOCK before solenoid locks - gives user plenty of time to close, arrange, and step away
 
 // Locker occupancy tracking (one per locker)
@@ -396,10 +395,10 @@ void irSensorTask(void * parameter) {
           if (currentState) {
             Serial.println("\n📦 OBJECT DETECTED in " + LOCKER_NAMES[locker] + "! (IR: " + String(irValue1) + ", " + String(irValue2) + ")");
             
-            // SMART AUTO-LOCK: If this locker was just unlocked and IR now detects door closed
+            // SMART AUTO-LOCK: If this locker was unlocked and IR now detects door closed
             // Wait at least AUTO_LOCK_DELAY from when door was UNLOCKED (not from first detection)
-            if (isLockerUnlocked && unlockedLocker == locker) {
-              unsigned long timeSinceUnlock = millis() - unlockedTime;
+            if (lockerUnlocked[locker]) {
+              unsigned long timeSinceUnlock = millis() - lockerUnlockTime[locker];
               if (timeSinceUnlock > AUTO_LOCK_DELAY) {  // Only lock if enough time has passed since door opened
                 Serial.println("   🔐 Door detected as CLOSED - AUTO-LOCKING...");
                 autoLockLocker(locker);
@@ -421,8 +420,8 @@ void irSensorTask(void * parameter) {
       }
       
       // TIMEOUT PROTECTION: If locker has been unlocked for too long without IR detection, force lock
-      if (isLockerUnlocked && unlockedLocker == locker) {
-        unsigned long timeSinceUnlock = millis() - unlockedTime;
+      if (lockerUnlocked[locker]) {
+        unsigned long timeSinceUnlock = millis() - lockerUnlockTime[locker];
         if (timeSinceUnlock > 30000) {  // 30 second timeout (same as original)
           Serial.println("   ⚠ 30 second timeout - forcing lock (IR may not have detected door closing)");
           autoLockLocker(locker);
@@ -836,9 +835,8 @@ void activateRelay(int relayIndex) {
   Serial.println("   🔓 Activating relay " + String(relayIndex + 1) + " (GPIO " + String(pin) + ")");
   
   // Mark this locker as unlocked for smart auto-lock
-  unlockedLocker = relayIndex;
-  unlockedTime = millis();
-  isLockerUnlocked = true;
+  lockerUnlocked[relayIndex] = true;
+  lockerUnlockTime[relayIndex] = millis();
   
   // Unlock by toggling to active state
   if (inverted) {
@@ -853,7 +851,7 @@ void activateRelay(int relayIndex) {
 
 // ========== Smart Auto-Lock (triggered by IR detection) ==========
 void autoLockLocker(int relayIndex) {
-  if (relayIndex < 0 || relayIndex > 3 || !isLockerUnlocked) {
+  if (relayIndex < 0 || relayIndex > 3 || !lockerUnlocked[relayIndex]) {
     return;
   }
   
@@ -869,9 +867,9 @@ void autoLockLocker(int relayIndex) {
     digitalWrite(pin, HIGH);  // Normal: HIGH = locked
   }
   
-  // Clear unlock flags
-  isLockerUnlocked = false;
-  unlockedLocker = -1;
+  // Clear unlock flags for this locker
+  lockerUnlocked[relayIndex] = false;
+  lockerUnlockTime[relayIndex] = 0;
   
   Serial.println("   ✓ Locker " + String(relayIndex + 1) + " is now LOCKED & SECURED");
   
