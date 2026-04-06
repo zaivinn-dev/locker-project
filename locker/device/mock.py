@@ -32,3 +32,8 @@ class MockDeviceController:
         st.locked = True
         return st
 
+    def clear_fingerprint_templates(self) -> bool:
+        """Clear all fingerprint templates from device."""
+        print("MockDeviceController: Clearing all fingerprint templates")
+        return True
+

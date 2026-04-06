@@ -2,6 +2,14 @@
 {% block title %}Member Access{% endblock %}
 {% block body %}
 
+<style>
+  @keyframes pulse-ring {
+    0% { box-shadow: 0 0 0 0 rgba(15, 110, 86, 0.7); }
+    70% { box-shadow: 0 0 0 20px rgba(15, 110, 86, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(15, 110, 86, 0); }
+  }
+</style>
+
 <nav class="als-nav">
   <a href="/" class="als-logo-circle" style="text-decoration:none;">
     <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" />
@@ -10,40 +18,303 @@
 </nav>
 
 <main class="als-main" style="align-items:center; padding: 2.5rem 1.5rem;">
-  <div style="width:100%; max-width:520px; text-align:center;">
-
-    <!-- Header -->
-    <div style="display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:2rem;">
-      <div style="width:48px; height:48px; border-radius:14px; background:#edfaf5;
-                  display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-        <svg width="24" height="24" viewBox="0 0 32 32" fill="none">
-          <circle cx="16" cy="11" r="5.5" fill="#0f6e56"/>
-          <path d="M7 28c0-5 4-9 9-9s9 4 9 9" stroke="#0f6e56" stroke-width="2" stroke-linecap="round" fill="none"/>
-        </svg>
-      </div>
-      <h1 style="margin:0; font-size:20px; font-weight:800; color:#1a2d3e; letter-spacing:0.02em;">Member Access</h1>
-    </div>
-
-    <!-- Card -->
+  <div style="width:100%; max-width:520px;">
     <div style="background:#fff; border-radius:20px; border:1px solid #e2e8f0; padding:2rem;">
-      <p style="margin:0; font-size:14px; color:#7a8fa6; line-height:1.6;">
-        This screen will guide members through fingerprint authentication and locker access.
-        We will connect this to the R307 and ESP32 later.
-      </p>
+      
+      <!-- Scanning State (initially shown) -->
+      <div id="scanning-state" style="text-align: center;">
+        <div style="width:64px; height:64px; border-radius:16px; background:#e8f4f0; display:flex; align-items:center; justify-content:center; margin:0 auto 1.5rem; box-shadow: 0 0 0 0 rgba(15, 110, 86, 0.7); animation: pulse-ring 2s infinite;">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="11" r="5.5" fill="#0f6e56"/>
+            <path d="M7 28c0-5 4-9 9-9s9 4 9 9" stroke="#0f6e56" stroke-width="2" stroke-linecap="round" fill="none"/>
+          </svg>
+        </div>
+        <h1 style="margin:0 0 8px 0; font-size:24px; font-weight:800; color:#0f6e56;">Place Your Finger</h1>
+        <p style="margin:0; font-size:14px; color:#7a8fa6;">Scan your fingerprint to access your locker</p>
+        <div id="scanner-status" style="margin:1rem 0 0; padding:8px 12px; background:#e8f4f0; border-radius:8px; border:1px solid #0f6e56; display:none;">
+          <div style="font-size:12px; color:#0f6e56; font-weight:600;">✓ Scanner Active</div>
+        </div>
+        <p style="margin:1rem 0 0; font-size:12px; color:#7a8fa6; font-weight:600;">Hold steady until scan completes...</p>
+        <p id="scan-status-text" style="margin:0.75rem 0 0; font-size:12px; color:#0f6e56; font-weight:600;">Waiting for scanner to activate...</p>
+      </div>
 
-      <!-- Back button -->
-      <button type="button" onclick="window.location.href='/'"
-              style="margin-top:1.5rem; width:100%; padding:13px; border-radius:12px; border:1.5px solid #e2e8f0;
-                     background:#fff; font-family:inherit; font-size:13px; font-weight:700;
-                     letter-spacing:0.08em; text-transform:uppercase; color:#7a8fa6;
-                     cursor:pointer; transition:background 0.15s, border-color 0.15s;"
-              onmouseover="this.style.background='#f4f6f9';this.style.borderColor='#ccd5de'"
-              onmouseout="this.style.background='#fff';this.style.borderColor='#e2e8f0'">
-        ← Back to Home
-      </button>
+      <!-- Success State (shown after authentication) -->
+      <div id="success-state" style="text-align: center; display:none;">
+        <div style="width:64px; height:64px; border-radius:16px; background:#e0f5e1; display:flex; align-items:center; justify-content:center; margin:0 auto 1.5rem;">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <path d="M16 2C8.3 2 2 8.3 2 16s6.3 14 14 14 14-6.3 14-14S23.7 2 16 2zm-2 19l-5-5 1.4-1.4L14 18.2l7.6-7.6L23 12l-9 9z" fill="#0f6e56"/>
+          </svg>
+        </div>
+        <h1 style="margin:0 0 8px 0; font-size:24px; font-weight:800; color:#0f6e56;">Access Granted</h1>
+        <p style="margin:0; font-size:14px; color:#7a8fa6;">Fingerprint authenticated successfully</p>
+
+        <div style="background:#e0f5e1; border: 1px solid #0f6e56; border-radius:12px; padding:1.5rem; margin:1.5rem 0; text-align:center;">
+          <div style="font-size:16px; font-weight:700; color:#0f6e56; margin-bottom:8px;">
+            Opening Locker #<span id="locker-number">--</span>
+          </div>
+          <div style="font-size:12px; color:#7a8fa6;">Your locker is being unlocked...</div>
+          <div id="auto-return-notice" style="font-size:11px; color:#0f6e56; margin-top:8px; font-weight:600;">
+            Returning to scanner in <span id="countdown">10</span> seconds...
+          </div>
+        </div>
+
+        <!-- Instructions -->
+        <div style="background:#f4f6f9; border-radius:12px; padding:14px 16px; margin-bottom:1.5rem; border-left:3px solid #0f6e56;">
+          <div style="font-size:11px; font-weight:700; color:#7a8fa6; text-transform:uppercase; margin-bottom:8px;">Next steps</div>
+          <ol style="margin:0; padding:0 0 0 18px; font-size:13px; color:#1a2d3e; line-height:1.8;">
+            <li>Wait for your locker to unlock</li>
+            <li>Open your assigned locker</li>
+            <li>Retrieve your items</li>
+            <li>Close and lock the locker</li>
+            <li>The system will automatically return to scanning mode</li>
+          </ol>
+        </div>
+
+        <!-- Back button -->
+        <button type="button" onclick="window.location.href='/'"
+                style="width:100%; padding:12px 16px; border-radius:12px; border:1.5px solid #e2e8f0; background:#fff; font-family:inherit; font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#7a8fa6; cursor:pointer; transition:all 0.15s ease;"
+                onmouseover="this.style.background='#f4f6f9';this.style.borderColor='#ccd5de'"
+                onmouseout="this.style.background='#fff';this.style.borderColor='#e2e8f0'">
+          ← Back to Home
+        </button>
+      </div>
+
+      <!-- Error State (shown if access denied) -->
+      <div id="error-state" style="text-align: center; display:none;">
+        <div style="width:64px; height:64px; border-radius:16px; background:#fee2e2; display:flex; align-items:center; justify-content:center; margin:0 auto 1.5rem;">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <path d="M16 2C8.3 2 2 8.3 2 16s6.3 14 14 14 14-6.3 14-14S23.7 2 16 2zm-1 11h2v6h-2zm0-8h2v2h-2z" fill="#dc2626"/>
+          </svg>
+        </div>
+        <h1 style="margin:0 0 8px 0; font-size:24px; font-weight:800; color:#dc2626;">Access Denied</h1>
+        <p style="margin:0; font-size:14px; color:#7a8fa6;">Your fingerprint was not recognized</p>
+        <div style="font-size:11px; color:#dc2626; margin:8px 0; font-weight:600;">
+          Auto-retrying in 5 seconds...
+        </div>
+        <button type="button" onclick="returnToScanning()"
+                style="width:100%; margin-top:1.5rem; padding:12px 16px; border-radius:12px; border:1.5px solid #e2e8f0; background:#fff; font-family:inherit; font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#7a8fa6; cursor:pointer; transition:all 0.15s ease;"
+                onmouseover="this.style.background='#f4f6f9';this.style.borderColor='#ccd5de'"
+                onmouseout="this.style.background='#fff';this.style.borderColor='#e2e8f0'">
+          Try Again
+        </button>
+      </div>
     </div>
   </div>
 </main>
 
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const scanningState = document.getElementById('scanning-state');
+  const successState = document.getElementById('success-state');
+  const errorState = document.getElementById('error-state');
+  const lockerNumber = document.getElementById('locker-number');
+  const scannerStatus = document.getElementById('scanner-status');
+  const countdownElement = document.getElementById('countdown');
+  const autoReturnNotice = document.getElementById('auto-return-notice');
+  
+  let pollInterval = null;
+  let heartbeatInterval = null;
+  let pollCount = 0;
+  let scanStatusText = document.getElementById('scan-status-text');
+  let autoReturnTimeout = null;
+
+  // Auto-return to scanning state after successful unlock
+  function startAutoReturn() {
+    let countdown = 10;
+    countdownElement.textContent = countdown;
+    autoReturnNotice.style.display = 'block';
+
+    autoReturnTimeout = setInterval(() => {
+      countdown--;
+      countdownElement.textContent = countdown;
+
+      if (countdown <= 0) {
+        clearInterval(autoReturnTimeout);
+        returnToScanning();
+      }
+    }, 1000);
+  }
+
+  // Return to home page for next member
+  async function returnToScanning() {
+    // Clear any existing intervals
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+    if (autoReturnTimeout) {
+      clearInterval(autoReturnTimeout);
+      autoReturnTimeout = null;
+    }
+
+    // Disable scanning before leaving
+    await disableScanning();
+
+    // Redirect to home page - next member can access from there
+    window.location.href = '/';
+  }
+
+  // Enable fingerprint scanning when this page loads
+  async function enableScanning() {
+    try {
+      const response = await fetch('/api/access/enable-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (response.ok) {
+        scanStatusText.textContent = 'Fingerprint scanner is active. Please place your finger.';
+        scannerStatus.style.display = 'block';
+        console.log('Scanning enabled on ESP32');
+      } else {
+        scanStatusText.textContent = 'Unable to activate scanner. Try reloading the page.';
+        scannerStatus.style.display = 'none';
+        console.log('Failed to enable scan:', response.status);
+      }
+    } catch (error) {
+      scanStatusText.textContent = 'Error activating scanner. Check network connection.';
+      scannerStatus.style.display = 'none';
+      console.log('Error enabling scan:', error);
+    }
+  }
+
+  // Send heartbeat to keep scanning enabled
+  async function sendHeartbeat() {
+    try {
+      await fetch('/api/access/enable-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.log('Heartbeat error:', error);
+    }
+  }
+
+  // Disable scanning when user leaves page
+  async function disableScanning() {
+    try {
+      await fetch('/api/access/disable-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      scannerStatus.style.display = 'none';
+      console.log('Member access scanning disabled');
+    } catch (error) {
+      console.log('Error disabling scan:', error);
+    }
+  }
+
+  async function pollForAccess() {
+    pollCount++;
+    try {
+      const response = await fetch('/api/access-status');
+      const data = await response.json();
+
+      // Success: locker unlocked
+      if (data.state === 'unlocked' && data.locker_id) {
+        lockerNumber.textContent = data.locker_id;
+        scanningState.style.display = 'none';
+        errorState.style.display = 'none';
+        successState.style.display = 'block';
+        scannerStatus.style.display = 'none';
+
+        // Stop polling and heartbeat temporarily
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+          heartbeatInterval = null;
+        }
+
+        // Start auto-return countdown
+        startAutoReturn();
+        return;
+      }
+
+      // Error: access denied
+      if (data.state === 'denied') {
+        scanningState.style.display = 'none';
+        successState.style.display = 'none';
+        errorState.style.display = 'block';
+        scannerStatus.style.display = 'none';
+
+        // Stop polling and heartbeat temporarily
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+          heartbeatInterval = null;
+        }
+
+        // Auto-return to scanning after 5 seconds for retry
+        setTimeout(async () => {
+          errorState.style.display = 'none';
+          scanningState.style.display = 'block';
+
+          // Re-enable scanning
+          await enableScanning();
+
+          // Restart heartbeat and polling
+          heartbeatInterval = setInterval(sendHeartbeat, 15000);
+          pollInterval = setInterval(pollForAccess, 500);
+          pollForAccess();
+        }, 5000);
+        return;
+      }
+
+      // Update scanning note for backend state changes
+      if (data.message) {
+        const scanHint = scanningState.querySelector('p:last-of-type');
+        if (scanHint) {
+          scanHint.textContent = data.message;
+        }
+      }
+
+      // Still waiting for scan - keep scanning state visible.
+      if (data.state === 'waiting') {
+        scanningState.style.display = 'block';
+        successState.style.display = 'none';
+        errorState.style.display = 'none';
+      }
+    } catch (error) {
+      console.log('Error polling access status:', error);
+    }
+  }
+
+  // Enable scanning immediately when page loads
+  enableScanning();
+  
+  // Send heartbeat every 15 seconds to keep scanning enabled
+  // (timeout is 60 seconds, so 15 second heartbeat keeps it alive)
+  heartbeatInterval = setInterval(sendHeartbeat, 15000);
+
+  // Start polling every 500ms (better responsiveness for unlock detection)
+  pollInterval = setInterval(pollForAccess, 500);
+  pollForAccess();
+
+  // Cleanup when user leaves page
+  window.addEventListener('beforeunload', function() {
+    if (autoReturnTimeout) {
+      clearInterval(autoReturnTimeout);
+    }
+    disableScanning();
+  });
+  window.addEventListener('pagehide', function() {
+    if (autoReturnTimeout) {
+      clearInterval(autoReturnTimeout);
+    }
+    disableScanning();
+  });
+});
+</script>
+
 {% endblock %}
+
 

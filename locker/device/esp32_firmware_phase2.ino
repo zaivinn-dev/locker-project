@@ -3,6 +3,9 @@
 #include <ArduinoJson.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include <Adafruit_Fingerprint.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 // ========== Configuration ==========
 #define RFID_CS_PIN 5
@@ -28,6 +31,13 @@ const char* WIFI_SSID = "Emelon Wifi";
 const char* WIFI_PASSWORD = "emelonwifi123";
 const char* BACKEND_RFID_URL = "http://192.168.2.103:5000/device/rfid";
 const char* BACKEND_IR_URL = "http://192.168.2.103:5000/device/ir-status";
+const char* BACKEND_FINGERPRINT_URL = "http://192.168.2.103:5000/device/fingerprint";
+const char* BACKEND_FINGERPRINT_ENROLL_URL = "http://192.168.2.103:5000/device/fingerprint/enroll";
+const char* BACKEND_FINGERPRINT_START_ENROLL_URL = "http://192.168.2.103:5000/device/fingerprint/start-enrollment";
+const char* BACKEND_SCAN_ENABLED_URL = "http://192.168.2.103:5000/api/access/scan-enabled";
+const unsigned long FINGERPRINT_POLL_INTERVAL = 100; // Poll fingerprint sensor every 100ms (faster response)
+const int FINGERPRINT_RX_PIN = 16;
+const int FINGERPRINT_TX_PIN = 17;
 const unsigned long RELAY_ACTIVATION_TIME = 2000;  // 2 seconds
 const unsigned long RFID_READ_DEBOUNCE = 500;  // 500ms between reads
 const unsigned long IR_CHECK_INTERVAL = 100;  // Check IR every 100ms (lightweight check)
@@ -38,6 +48,8 @@ const String LOCKER_NAMES[4] = {"locker_1", "locker_2", "locker_3", "locker_4"};
 
 // ========== Hardware Objects ==========
 MFRC522 rfid(RFID_CS_PIN, RFID_RST_PIN);
+HardwareSerial fingerSerial(2);
+Adafruit_Fingerprint finger(&fingerSerial);
 int relayPins[] = {RELAY_1_PIN, RELAY_2_PIN, RELAY_3_PIN, RELAY_4_PIN};
 
 // ========== Relay Logic Configuration ==========
@@ -45,6 +57,15 @@ int relayPins[] = {RELAY_1_PIN, RELAY_2_PIN, RELAY_3_PIN, RELAY_4_PIN};
 // Relay 1 (GPIO 25): Normal logic
 // Relays 2-4 (GPIO 26,27,32): Inverted logic
 bool relayInverted[] = {false, true, true, true};
+
+unsigned long lastFingerprintPoll = 0;
+unsigned long lastEnrollmentComplete = 0;
+const unsigned long ENROLLMENT_COOLDOWN = 3000; // Prevent immediate access scan after enrollment
+
+// Enrollment state
+bool enrollmentMode = false;
+int enrollmentStep = 0; // 0=waiting, 1=first scan, 2=second scan, 3=enrolled
+unsigned long enrollmentStartTime = 0;
 
 // ========== Global State ==========
 unsigned long lastRfidRead = 0;
@@ -56,6 +77,11 @@ unsigned long lastIrCheck = 0;
 bool offlineMode = false;
 unsigned long lastWiFiConnection = 0;
 const unsigned long OFFLINE_TIMEOUT = 30000;  // 30 seconds without WiFi = offline mode
+
+// Fingerprint scan permission tracking
+bool scanPermissionAllowed = false;
+unsigned long lastScanPermissionCheck = 0;
+const unsigned long SCAN_PERMISSION_POLL_INTERVAL = 1000;  // Check scan enable state every 1 second
 
 // Smart Auto-Lock Tracking
 int unlockedLocker = -1;  // Which locker is currently unlocked (-1 = none)
@@ -70,6 +96,9 @@ int lockerStateConfirm[4] = {0, 0, 0, 0};  // Consecutive reads confirming curre
 
 // ========== Setup ==========
 void setup() {
+  // Disable brownout detector to prevent unwanted resets
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  
   Serial.begin(115200);
   delay(500);
   
@@ -82,6 +111,7 @@ void setup() {
   setupRelays();
   setupRFID();
   setupWiFi();
+  setupFingerprintSensor();
   setupIRSensor();
   
   // Create IR sensor task on Core 1 (runs independently, never blocked by HTTP)
@@ -109,12 +139,34 @@ void loop() {
   // Yield to watchdog timer regularly - CRITICAL for stability
   yield();
   
+  // Check for serial commands
+  if (Serial.available()) {
+    String raw = Serial.readStringUntil('\n');
+    if (raw.length() == 0) {
+      raw = Serial.readStringUntil('\r');
+    }
+    raw.trim();
+    raw.replace("\r", "");
+    raw.replace("\n", "");
+
+    if (raw.length() > 0) {
+      Serial.println("🔧 Serial command received: '" + raw + "'");
+      if (raw == "reset_fp") {
+        resetFingerprints();
+      } else if (raw == "status") {
+        printStatus();
+      } else {
+        Serial.println("❌ Unknown serial command: '" + raw + "'");
+      }
+    }
+  }
+  
   // Debug: Print status every 10 seconds
   static unsigned long lastStatusPrint = 0;
   if (millis() - lastStatusPrint > 10000) {
     String wifiStatus = WiFi.status() == WL_CONNECTED ? "CONNECTED" : "DISCONNECTED";
     String modeStatus = offlineMode ? " (OFFLINE MODE)" : "";
-    Serial.println("🔄 Main loop running... WiFi: " + wifiStatus + modeStatus);
+    Serial.println("🔄 Main loop running... WiFi: " + wifiStatus + modeStatus + " enrollmentMode: " + String(enrollmentMode));
     lastStatusPrint = millis();
   }
   
@@ -159,6 +211,18 @@ void loop() {
   // Check for RFID card (Core 0 - HTTP requests can take time)
   readAndProcessRFID();
   yield();  // Yield after RFID check
+
+  // Check fingerprint scanner for member access
+  readAndProcessFingerprint();
+  yield();
+  
+  // Process fingerprint enrollment if in enrollment mode
+  processFingerprintEnrollment();
+  yield();
+  
+  // Check for enrollment commands from backend
+  checkForEnrollmentCommand();
+  yield();
   
   delay(50);  // Small delay - IR sensor is handled on Core 1, not here
 }
@@ -229,6 +293,8 @@ void setupWiFi() {
     Serial.println("   ✓ IP: " + WiFi.localIP().toString());
     Serial.println("   ✓ RFID Backend: " + String(BACKEND_RFID_URL));
     Serial.println("   ✓ IR Backend: " + String(BACKEND_IR_URL));
+    Serial.println("   ✓ Fingerprint Backend: " + String(BACKEND_FINGERPRINT_URL));
+    Serial.println("   ✓ Fingerprint Enroll Backend: " + String(BACKEND_FINGERPRINT_ENROLL_URL));
     wifiConnected = true;
   } else {
     Serial.println("\n   ✗ Failed to connect to WiFi!");
@@ -238,6 +304,41 @@ void setupWiFi() {
 }
 
 // ========== IR SENSOR SETUP ==========
+void setupFingerprintSensor() {
+  Serial.println("🔧 Setting up ZA620_M5 fingerprint scanner...");
+  fingerSerial.begin(57600, SERIAL_8N1, FINGERPRINT_RX_PIN, FINGERPRINT_TX_PIN);
+  delay(100);
+  
+  finger.begin(57600);
+  delay(100);
+  
+  uint8_t p = finger.verifyPassword();
+  if (p == FINGERPRINT_OK) {
+    // Optional: Clear all stored fingerprints (uncomment if you want to reset)
+    // Serial.println("   🔄 Clearing all stored fingerprint templates...");
+    // finger.emptyDatabase();
+    // delay(1000);
+    // Serial.println("   ✓ All templates cleared. Sensor ready for new enrollments.");
+    
+    finger.getTemplateCount();
+    Serial.println("   ✓ Fingerprint sensor ready. Stored templates: " + String(finger.templateCount));
+    
+    // Optimize sensor parameters for reliable scanning
+    finger.setSecurityLevel(2);  // Security level 2 = good balance between sensitivity and accuracy
+    delay(100);
+    
+    Serial.println("   ✓ Sensor parameters optimized for scanning");
+    Serial.println("   💡 Troubleshooting tips:");
+    Serial.println("      - If no scans: Check RX(16)/TX(17) connections");
+    Serial.println("      - If intermittent: Clean sensor with soft cloth");
+    Serial.println("      - If poor quality: Press finger firmly and steadily");
+  } else {
+    Serial.println("   ✗ Fingerprint sensor not found or not responding.");
+    Serial.println("     Check ZA620_M5 wiring: RX->16, TX->17, 3.3V, GND");
+    Serial.println("     Also verify sensor is powered and baud rate is 57600");
+  }
+}
+
 void setupIRSensor() {
   Serial.println("🔧 Setting up IR sensors (4 lockers x 2 sensors)...");
   
@@ -317,6 +418,15 @@ void irSensorTask(void * parameter) {
         // State changed, reset confirm counter immediately
         lockerOccupied[locker] = currentState;
         lockerStateConfirm[locker] = 1;
+      }
+      
+      // TIMEOUT PROTECTION: If locker has been unlocked for too long without IR detection, force lock
+      if (isLockerUnlocked && unlockedLocker == locker) {
+        unsigned long timeSinceUnlock = millis() - unlockedTime;
+        if (timeSinceUnlock > 30000) {  // 30 second timeout (same as original)
+          Serial.println("   ⚠ 30 second timeout - forcing lock (IR may not have detected door closing)");
+          autoLockLocker(locker);
+        }
       }
     }
     
@@ -518,6 +628,148 @@ void sendCardToBackend(String uid) {
   yield();  // Yield to watchdog timer - CRITICAL
 }
 
+bool checkScanPermission() {
+  // If enrollment is active, don't allow access scanning
+  if (enrollmentMode) {
+    scanPermissionAllowed = false;
+    return false;
+  }
+
+  if (millis() - lastScanPermissionCheck < SCAN_PERMISSION_POLL_INTERVAL) {
+    return scanPermissionAllowed;
+  }
+
+  lastScanPermissionCheck = millis();
+  if (offlineMode) {
+    scanPermissionAllowed = false;
+    return false;
+  }
+
+  HTTPClient http;
+  http.setTimeout(2000);
+  if (!http.begin(BACKEND_SCAN_ENABLED_URL)) {
+    http.end();
+    scanPermissionAllowed = false;
+    return false;
+  }
+
+  int httpCode = http.GET();
+  if (httpCode == 200) {
+    String response = http.getString();
+    StaticJsonDocument<128> doc;
+    DeserializationError error = deserializeJson(doc, response);
+    if (!error) {
+      scanPermissionAllowed = doc["enabled"] | false;
+    } else {
+      scanPermissionAllowed = false;
+    }
+  } else {
+    scanPermissionAllowed = false;
+  }
+
+  http.end();
+  return scanPermissionAllowed;
+}
+
+void readAndProcessFingerprint() {
+  if (millis() - lastFingerprintPoll < FINGERPRINT_POLL_INTERVAL) {
+    return;
+  }
+  lastFingerprintPoll = millis();
+
+  if (enrollmentMode) {
+    return;
+  }
+
+  if (millis() - lastEnrollmentComplete < ENROLLMENT_COOLDOWN) {
+    return;
+  }
+
+  if (!checkScanPermission()) {
+    return;
+  }
+
+  // Allow fingerprint scanning even when lockers are unlocked
+  // Multiple members should be able to access their lockers simultaneously
+
+  uint8_t p = finger.getImage();
+  if (p != FINGERPRINT_OK) {
+    return;  // No finger detected - normal condition
+  }
+
+  p = finger.image2Tz(1);
+  if (p != FINGERPRINT_OK) {
+    Serial.print("FP CAPTURE ERROR: ");
+    Serial.println(p, HEX);
+    
+    // Provide diagnostic hints based on error code
+    if (p == 0x06) {
+      Serial.println("  → Poor image quality - place finger more firmly on sensor");
+    } else if (p == 0x07) {
+      Serial.println("  → Sensor may need cleaning - wipe with soft cloth");
+    }
+    
+    showError("FP CAPTURE ERROR");
+    return;
+  }
+
+  p = finger.fingerSearch();
+  if (p == FINGERPRINT_OK) {
+    String uid = String(finger.fingerID);
+    Serial.println("🔐 Fingerprint recognized! ID=" + uid);
+    sendFingerprintToBackend(uid);
+    delay(1000);
+  } else if (p == FINGERPRINT_NOTFOUND) {
+    Serial.println("  → Fingerprint not in database");
+    showError("FP NOT FOUND");
+  } else if (p == 0xFE) {
+    Serial.println("  → Communication error - sensor may need restart");
+    showError("SENSOR ERROR");
+  } else {
+    Serial.print("  → Search error code: 0x");
+    Serial.println(p, HEX);
+    showError("FP SEARCH ERROR");
+  }
+}
+
+void sendFingerprintToBackend(String uid) {
+  if (offlineMode || WiFi.status() != WL_CONNECTED) {
+    showError("CONNECTION ERROR");
+    return;
+  }
+
+  HTTPClient http;
+  http.setTimeout(3000);
+
+  if (!http.begin(BACKEND_FINGERPRINT_URL)) {
+    http.end();
+    showError("CONNECTION FAILED");
+    return;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  StaticJsonDocument<200> doc;
+  doc["uid"] = uid;
+  String payload;
+  serializeJson(doc, payload);
+
+  int httpCode = http.POST(payload);
+
+  if (httpCode > 0) {
+    String response = http.getString();
+    Serial.println("   HTTP code: " + String(httpCode));
+    Serial.println("   Fingerprint backend response raw: " + response);
+    handleBackendResponse(response);
+  } else {
+    Serial.println("   HTTP error code: " + String(httpCode));
+    showError("HTTP ERROR");
+  }
+
+  http.end();
+  payload = "";
+}
+
+
 // ========== Handle Backend Response ==========
 void handleBackendResponse(String response) {
   StaticJsonDocument<200> doc;
@@ -525,6 +777,7 @@ void handleBackendResponse(String response) {
   
   if (error) {
     Serial.println("   ✗ JSON parse error: " + String(error.c_str()));
+    Serial.println("   Raw response for debug: " + response);
     showError("JSON ERROR");
     return;
   }
@@ -549,6 +802,15 @@ void handleBackendResponse(String response) {
     String reason = doc["reason"] | "unknown";
     Serial.println("   ✗ ACCESS DENIED (" + reason + ")");
     showError("ACCESS DENIED");
+  } else if (status == "rejected") {
+    // Scanning not enabled (user not on member access page)
+    String reason = doc["reason"] | "unknown";
+    Serial.println("   ✗ REJECTED (" + reason + ")");
+    if (reason == "scanning_not_enabled") {
+      showError("USE ACCESS PAGE");
+    } else {
+      showError("REJECTED");
+    }
   } else if (status == "failed") {
     // Failed to process
     String reason = doc["reason"] | "unknown";
@@ -585,20 +847,8 @@ void activateRelay(int relayIndex) {
     digitalWrite(pin, LOW);   // Normal: LOW = unlocked
   }
   
-  // WAIT FOR AUTO-LOCK (user closes door, IR detects, auto-locks)
-  // Timeout after 30 seconds if IR doesn't detect
-  unsigned long timeout = millis() + 30000;  // 30 second timeout
-  
-  while (isLockerUnlocked && millis() < timeout) {
-    yield();  // Feed watchdog
-    delay(100);
-  }
-  
-  // If still unlocked after timeout, lock it manually
-  if (isLockerUnlocked) {
-    Serial.println("   ⚠ 30 second timeout - forcing lock (IR may not have detected)");
-    autoLockLocker(relayIndex);
-  }
+  // DON'T BLOCK THE MAIN LOOP - let auto-lock happen asynchronously via IR sensor
+  // The IR sensor task on Core 1 will detect when door closes and auto-lock
 }
 
 // ========== Smart Auto-Lock (triggered by IR detection) ==========
@@ -638,18 +888,268 @@ void showError(String message) {
   Serial.println("\n   ✗✗✗ " + message + " ✗✗✗\n");
 }
 
-// ========== Optional: Status Report ==========
-void printStatus() {
-  Serial.println("\n╔════════════════════════════════════╗");
-  Serial.println("║       System Status Report       ║");
-  Serial.println("╚════════════════════════════════════╝");
-  Serial.println("WiFi AP:  " + String(wifiConnected ? "✓ Active" : "✗ Inactive"));
-  Serial.println("RFID:     ✓ Ready");
-  Serial.println("IR Sensors (4 Lockers):");
-  for (int i = 0; i < 4; i++) {
-    Serial.println("   " + LOCKER_NAMES[i] + ": " + String(lockerOccupied[i] ? "OCCUPIED" : "EMPTY"));
+// ========== Fingerprint Enrollment Functions ==========
+void startFingerprintEnrollment() {
+  if (enrollmentMode) {
+    return;
   }
-  Serial.println("Relays:   ✓ Ready (4x GPIO)");
-  Serial.println("Uptime:   " + String(millis() / 1000) + "s");
-  Serial.println();
+
+  enrollmentMode = true;
+  enrollmentStep = 0;
+  enrollmentStartTime = millis();
+  Serial.println("🔐 Enrollment mode started");
+}
+
+void stopFingerprintEnrollment() {
+  if (!enrollmentMode) {
+    return;
+  }
+
+  enrollmentMode = false;
+  enrollmentStep = 0;
+  
+  // Report enrollment stopped to backend
+  HTTPClient http;
+  http.setTimeout(3000);
+  if (http.begin(BACKEND_FINGERPRINT_START_ENROLL_URL)) {
+    http.addHeader("Content-Type", "application/json");
+    int httpCode = http.POST("{\"action\":\"stop\"}");
+    if (httpCode == 200) {
+      Serial.println("✓ Enrollment stop reported to backend");
+    }
+    http.end();
+  }
+  
+  Serial.println("🔐 Enrollment mode stopped");
+}
+
+void processFingerprintEnrollment() {
+  if (!enrollmentMode) {
+    return;
+  }
+
+  // Check for enrollment timeout (2 minutes)
+  if (millis() - enrollmentStartTime > 120000) {
+    Serial.println("⚠ Enrollment session timed out. Stopping enrollment.");
+    stopFingerprintEnrollment();
+    // Report timeout error to backend
+    return;
+  }
+
+  uint8_t p = finger.getImage();
+  if (p != FINGERPRINT_OK) {
+    return;
+  }
+
+  switch (enrollmentStep) {
+    case 0: // First scan
+      p = finger.image2Tz(1);
+      if (p == FINGERPRINT_OK) {
+        Serial.println("✓ First scan successful. Remove your finger and place it again for second scan.");
+        // Report first scan completion to backend
+        bool reportSuccess = sendFingerprintEnrollmentToBackend("temp", 1);
+        if (reportSuccess) {
+          enrollmentStep = 1;
+          unsigned long releaseStart = millis();
+          const unsigned long removeTimeout = 15000;
+          while (millis() - releaseStart < removeTimeout) {
+            if (finger.getImage() != FINGERPRINT_OK) {
+              break;
+            }
+            delay(100);
+          }
+          if (finger.getImage() == FINGERPRINT_OK) {
+            Serial.println("   ⚠ Finger still detected after waiting - please lift your finger completely and try again.");
+          }
+          delay(200);
+        } else {
+          Serial.println("✗ Failed to report first scan to backend.");
+          stopFingerprintEnrollment();
+        }
+      } else {
+        Serial.println("✗ First scan failed - please try again.");
+      }
+      break;
+
+    case 1: // Second scan
+      Serial.println("⏳ Second scan started - place finger firmly and keep it steady.");
+      p = finger.image2Tz(2);
+      if (p == FINGERPRINT_OK) {
+        Serial.println("   ✓ Second scan captured.");
+        p = finger.createModel();
+        if (p == FINGERPRINT_OK) {
+          finger.getTemplateCount();
+          uint16_t templateId = finger.templateCount + 1;
+          if (templateId == 0) {
+            templateId = 1;
+          }
+
+          p = finger.storeModel(templateId);
+          if (p == FINGERPRINT_OK) {
+            String uid = String(templateId);
+            Serial.println("✅ Fingerprint enrolled! Template ID: " + uid);
+            bool backendSuccess = sendFingerprintEnrollmentToBackend(uid, 2);
+            if (backendSuccess) {
+              lastEnrollmentComplete = millis();
+              enrollmentStep = 2;
+              stopFingerprintEnrollment();
+            } else {
+              Serial.println("   ⚠ Enrollment reported failed. Please try again.");
+              enrollmentStep = 0;
+              enrollmentStartTime = millis();
+            }
+          } else {
+            Serial.println("✗ Failed to store template (slot=" + String(templateId) + ").");
+            Serial.println("   Please clear existing templates or reboot the device and try again.");
+            stopFingerprintEnrollment();
+          }
+        } else {
+          Serial.println("✗ Failed to create model - scans do not match.");
+          stopFingerprintEnrollment();
+        }
+      } else {
+        Serial.print("✗ Second scan failed - error code 0x");
+        Serial.println(p, HEX);
+        if (p == FINGERPRINT_INVALIDIMAGE) {
+          Serial.println("   → Invalid image - clean sensor and try again.");
+        } else if (p == FINGERPRINT_FEATUREFAIL) {
+          Serial.println("   → Poor image quality - press your finger more firmly.");
+        } else if (p == FINGERPRINT_PACKETRECIEVEERR) {
+          Serial.println("   → Communication error with sensor.");
+        }
+      }
+      break;
+  }
+}
+
+bool sendFingerprintEnrollmentToBackend(String templateId, int step) {
+  if (offlineMode || WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠ Cannot report enrollment: WiFi unavailable.");
+    return false;
+  }
+
+  HTTPClient http;
+  http.setTimeout(5000);
+
+  if (!http.begin(BACKEND_FINGERPRINT_ENROLL_URL)) {
+    Serial.println("✗ Failed to open enrollment endpoint.");
+    http.end();
+    return false;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  StaticJsonDocument<200> doc;
+  doc["uid"] = templateId;
+  doc["step"] = step;  // 1=first scan, 2=enrolled
+  String payload;
+  serializeJson(doc, payload);
+
+  int httpCode = http.POST(payload);
+  Serial.println("   Enrollment POST " + String(httpCode) + " -> " + payload);
+
+  bool success = false;
+  if (httpCode > 0) {
+    String response = http.getString();
+    Serial.println("   Enrollment backend response: " + response);
+
+    StaticJsonDocument<200> respDoc;
+    DeserializationError error = deserializeJson(respDoc, response);
+    if (error) {
+      Serial.println("   ✗ Enrollment response parse error: " + String(error.c_str()));
+      showError("ENROLLMENT RESPONSE INVALID");
+    } else {
+      String status = respDoc["status"] | "";
+      if (status == "first_scan_complete" || status == "enrolled") {
+        Serial.println("   ✓ Fingerprint enrollment step successfully reported to backend.");
+        success = true;
+      } else {
+        Serial.println("   ✗ Unexpected enrollment response status: " + status);
+        showError("ENROLLMENT FAILED");
+      }
+    }
+  } else {
+    Serial.println("   Enrollment report failed with HTTP code " + String(httpCode));
+    showError("ENROLLMENT REPORT FAILED");
+  }
+
+  http.end();
+  payload = "";
+  return success;
+}
+
+void checkForEnrollmentCommand() {
+  static unsigned long lastEnrollmentCheck = 0;
+  if (millis() - lastEnrollmentCheck < 2000) {
+    return;
+  }
+  lastEnrollmentCheck = millis();
+
+  if (offlineMode || WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+
+  HTTPClient http;
+  http.setTimeout(3000);
+
+  if (!http.begin(BACKEND_FINGERPRINT_START_ENROLL_URL)) {
+    http.end();
+    return;
+  }
+
+  int httpCode = http.POST("{}");
+
+  if (httpCode == 200) {
+    String response = http.getString();
+
+    StaticJsonDocument<128> doc;
+    DeserializationError error = deserializeJson(doc, response);
+    if (!error) {
+      const char* status = doc["status"];
+
+      if (status && strcmp(status, "enrollment_started") == 0 && !enrollmentMode) {
+        startFingerprintEnrollment();
+      } else if (status && strcmp(status, "enrollment_stopped") == 0 && enrollmentMode) {
+        stopFingerprintEnrollment();
+      }
+    }
+  }
+
+  http.end();
+}
+
+void resetFingerprints() {
+  Serial.println("🔄 Resetting fingerprint sensor database...");
+  
+  uint8_t p = finger.emptyDatabase();
+  if (p == FINGERPRINT_OK) {
+    Serial.println("✅ All fingerprint templates cleared!");
+    Serial.println("📊 Sensor now has 0 stored templates");
+    Serial.println("💡 Members need to re-enroll fingerprints");
+  } else {
+    Serial.println("❌ Failed to clear fingerprint database (error: 0x" + String(p, HEX) + ")");
+  }
+  
+  // Update template count
+  finger.getTemplateCount();
+  Serial.println("📈 Current template count: " + String(finger.templateCount));
+}
+
+void printStatus() {
+  Serial.println("📊 System Status:");
+  Serial.println("  WiFi: " + String(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "DISCONNECTED"));
+  Serial.println("  IP: " + WiFi.localIP().toString());
+  Serial.println("  Enrollment Mode: " + String(enrollmentMode ? "ACTIVE" : "INACTIVE"));
+  Serial.println("  Offline Mode: " + String(offlineMode ? "YES" : "NO"));
+  
+  // Fingerprint status
+  if (finger.verifyPassword() == FINGERPRINT_OK) {
+    finger.getTemplateCount();
+    Serial.println("  Fingerprint Templates: " + String(finger.templateCount));
+  } else {
+    Serial.println("  Fingerprint Sensor: NOT RESPONDING");
+  }
+  
+  Serial.println("📋 Available Commands:");
+  Serial.println("  reset_fp  - Clear all fingerprint templates");
+  Serial.println("  status    - Show this status information");
 }

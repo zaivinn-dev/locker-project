@@ -2,12 +2,23 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import flask
 from flask import Blueprint, redirect, render_template, request, session, url_for
 import json
 import os
 
-from locker.db import connect
-from locker.device import get_device_controller
+try:
+    from .db import connect
+    from .device import get_device_controller
+except ImportError:
+    from db import connect
+    from device import get_device_controller
+
+# Shared enrollment state (same as in web.py)
+fingerprint_enrollment_state = {
+    "pending": False,
+    "enrolled_uid": None,
+}
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 
@@ -120,6 +131,135 @@ def admin_login_submit():
 def admin_logout():
     session.clear()
     return redirect(url_for("admin.admin_login"))
+
+
+@admin_bp.get("/reset-data")
+def reset_data_get():
+    return redirect(url_for("admin.admin_settings"))
+
+
+@admin_bp.post("/reset-data")
+def reset_data():
+    debug_info = ["Reset attempt started"]
+    
+    guard = _require_admin()
+    if guard is not None:
+        debug_info.append("Admin authentication failed - redirecting to login")
+        flask.flash("Reset failed: Not logged in as admin", "danger")
+        return guard
+    
+    debug_info.append("Admin authentication passed")
+    
+    # Require confirmation
+    confirm = request.form.get("confirm", "").strip()
+    debug_info.append(f"Confirmation text received: '{confirm}'")
+    
+    if confirm != "RESET_ALL_DATA":
+        debug_info.append("Confirmation text incorrect")
+        flask.flash(f"Reset cancelled - confirmation text incorrect. Received: '{confirm}'", "danger")
+        return redirect(url_for("admin.admin_settings"))
+    
+    debug_info.append("Confirmation text correct, proceeding with reset")
+    
+    try:
+        with connect() as conn:
+            debug_info.append("Connected to database")
+            
+            # Log the reset action
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                ("admin", session.get("admin_username", "unknown"), "system_reset", "All data reset initiated"),
+            )
+            debug_info.append("Logged reset action")
+            
+            # Delete all payments first (due to foreign key constraints)
+            result = conn.execute("DELETE FROM payments")
+            debug_info.append(f"Deleted {result.rowcount} payments")
+            
+            # Delete all members (regular and guest)
+            result = conn.execute("DELETE FROM members")
+            debug_info.append(f"Deleted {result.rowcount} members")
+            
+            # Delete all access logs
+            result = conn.execute("DELETE FROM access_logs")
+            debug_info.append(f"Deleted {result.rowcount} access logs")
+            
+            # Reset all lockers to available
+            result = conn.execute("UPDATE lockers SET status = 'available'")
+            debug_info.append(f"Reset {result.rowcount} lockers")
+            
+            # Reset fingerprint enrollment state
+            global fingerprint_enrollment_state
+            fingerprint_enrollment_state = {
+                "pending": False,
+                "enrolled_uid": None,
+            }
+            debug_info.append("Reset fingerprint enrollment state")
+            
+            # Clear all fingerprint templates from device
+            device = get_device_controller()
+            if device.clear_fingerprint_templates():
+                debug_info.append("Cleared all fingerprint templates from device")
+            else:
+                debug_info.append("Warning: Failed to clear fingerprint templates from device")
+            
+            conn.commit()
+            debug_info.append("Transaction committed successfully")
+        
+        debug_info.append("Reset completed successfully")
+        flask.flash("All data has been reset successfully", "success")
+        return redirect(url_for("admin.admin_dashboard"))
+        
+    except Exception as e:
+        # Log the error and show message
+        error_msg = f"Reset failed: {str(e)}"
+        debug_info.append(f"ERROR: {error_msg}")
+        flask.flash(f"{error_msg}\nDebug: {' | '.join(debug_info)}", "danger")
+        return redirect(url_for("admin.admin_settings"))
+
+
+@admin_bp.post("/clear-fingerprints")
+def clear_fingerprints():
+    """Clear all fingerprint templates from device."""
+    guard = _require_admin()
+    if guard is not None:
+        flask.flash("Access denied: Not logged in as admin", "danger")
+        return guard
+    
+    try:
+        device = get_device_controller()
+        if device.clear_fingerprint_templates():
+            # Log the action
+            with connect() as conn:
+                conn.execute(
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("admin", session.get("admin_username", "unknown"), "fingerprint_clear", "All fingerprint templates cleared from device"),
+                )
+                conn.commit()
+            
+            flask.flash("All fingerprint templates have been cleared from the device", "success")
+        else:
+            # For devices that don't support clearing (like ESP32), we can still clear the database associations
+            # and reset the enrollment state
+            global fingerprint_enrollment_state
+            fingerprint_enrollment_state = {
+                "pending": False,
+                "enrolled_uid": None,
+            }
+            
+            # Log the action
+            with connect() as conn:
+                conn.execute(
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("admin", session.get("admin_username", "unknown"), "fingerprint_clear", "Fingerprint enrollment state reset (device clearing not supported)"),
+                )
+                conn.commit()
+            
+            flask.flash("Fingerprint enrollment state has been reset. Device fingerprint clearing requires firmware update.", "warning")
+    except Exception as e:
+        flask.flash(f"Error clearing fingerprints: {str(e)}", "danger")
+    
+    return redirect(url_for("admin.admin_settings"))
 
 
 @admin_bp.get("")
@@ -458,10 +598,16 @@ def admin_delete_member(member_id: int):
     if guard is not None:
         return guard
     with connect() as conn:
-        # Get member info before deletion for logging
-        member = conn.execute("SELECT full_name, locker_id FROM members WHERE id = ?", (member_id,)).fetchone()
+        # Get member info before deletion for logging and cleanup
+        member = conn.execute(
+            "SELECT full_name, locker_id, fingerprint_uid, rfid_uid FROM members WHERE id = ?",
+            (member_id,),
+        ).fetchone()
         if member:
             locker_id = member["locker_id"]
+            fingerprint_uid = member["fingerprint_uid"]
+            rfid_uid = member["rfid_uid"]
+
             # Free the locker if assigned
             if locker_id:
                 conn.execute("UPDATE lockers SET status = 'available' WHERE id = ?", (locker_id,))
@@ -469,17 +615,36 @@ def admin_delete_member(member_id: int):
                     "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
                     ("admin", str(member_id), "locker_freed", f"locker_id={locker_id}"),
                 )
-            
+
             # Remove associated payments so revenue totals adjust after deletion
             conn.execute("DELETE FROM payments WHERE member_id = ?", (member_id,))
-            
+
+            # Attempt fingerprint cleanup on attached device when this member had a fingerprint registered
+            if fingerprint_uid:
+                device = get_device_controller()
+                if device.clear_fingerprint_templates():
+                    conn.execute(
+                        "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                        ("admin", str(member_id), "fingerprint_cleared", f"fingerprint_uid={fingerprint_uid}"),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                        ("admin", str(member_id), "fingerprint_cleanup_failed", f"fingerprint_uid={fingerprint_uid} (device cleanup unsupported)"),
+                    )
+
             # Delete the member
             conn.execute("DELETE FROM members WHERE id = ?", (member_id,))
             conn.execute(
                 "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                ("admin", str(member_id), "member_deleted", f"member_name={member['full_name']}"),
+                (
+                    "admin",
+                    str(member_id),
+                    "member_deleted",
+                    f"member_name={member['full_name']} fingerprint_uid={fingerprint_uid or 'none'} rfid_uid={rfid_uid or 'none'}",
+                ),
             )
-        
+
         # CRITICAL: Commit all changes to database
         conn.commit()
     return redirect(url_for("admin.admin_members"))
@@ -579,56 +744,6 @@ def admin_access_logs():
         actor_types=actor_types,
         actions=actions,
         current_page="access_logs",
-        admin_username=session.get("admin_username"),
-    )
-
-
-@admin_bp.get("/ir-logs")
-def admin_ir_logs():
-    """Display IR sensor occupancy logs."""
-    guard = _require_admin()
-    if guard is not None:
-        return guard
-    
-    limit = int(request.args.get("limit", 100))
-    with connect() as conn:
-        # Get all IR sensor logs, newest first
-        ir_logs = conn.execute(
-            """
-            SELECT id, actor_type, actor_ref, action, detail, created_at 
-            FROM access_logs 
-            WHERE actor_type = 'ir_sensor' 
-            ORDER BY id DESC 
-            LIMIT ?
-            """,
-            (limit,)
-        ).fetchall()
-        
-        # Count stats
-        total_reports = conn.execute(
-            "SELECT COUNT(*) AS c FROM access_logs WHERE actor_type = 'ir_sensor'"
-        ).fetchone()["c"]
-        
-        occupied_reports = conn.execute(
-            "SELECT COUNT(*) AS c FROM access_logs WHERE actor_type = 'ir_sensor' AND detail LIKE '%status=occupied%'"
-        ).fetchone()["c"]
-        
-        available_reports = conn.execute(
-            "SELECT COUNT(*) AS c FROM access_logs WHERE actor_type = 'ir_sensor' AND detail LIKE '%status=available%'"
-        ).fetchone()["c"]
-    
-    stats = {
-        "total": total_reports,
-        "occupied": occupied_reports,
-        "available": available_reports,
-    }
-    
-    return render_template(
-        "admin/pages/admin_ir_logs.html",
-        ir_logs=ir_logs,
-        stats=stats,
-        limit=limit,
-        current_page="ir_logs",
         admin_username=session.get("admin_username"),
     )
 
@@ -869,6 +984,14 @@ def admin_create_guest():
         elif existing and existing["member_type"] != "guest":
             # Don't allow reusing member RFIDs
             return {"error": "RFID card already in use by a member"}, 409
+        
+        # Check for role conflict: prevent creating guest if person already has fingerprint as member
+        role_conflict = conn.execute(
+            "SELECT id, member_type FROM members WHERE full_name = ? AND fingerprint_uid IS NOT NULL",
+            (full_name,),
+        ).fetchone()
+        if role_conflict:
+            return {"error": "Person already registered as member with fingerprint - cannot create as guest"}, 409
         
         # Check locker availability
         locker = conn.execute(

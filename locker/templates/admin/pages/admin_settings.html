@@ -285,6 +285,19 @@
   {% endif %}
 
   <form method="POST" action="{{ url_for('admin.admin_settings_update') }}" class="settings-wrapper">
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div style="padding: 0 2rem; margin-top: 1rem;">
+            <div class="alert alert-{{ 'success' if category == 'success' else 'danger' }}">
+              {{ message }}
+            </div>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
     
     <!-- Tab Buttons -->
     <div class="settings-buttons">
@@ -510,9 +523,52 @@
           </tbody>
         </table>
       </div>
-    </div>
 
   </form>
+
+  <!-- System Maintenance Section (outside main form) -->
+  <div style="margin-top: 2rem; padding: 2rem; background: white; border-radius: 0.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    <h5 style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1.5rem; color: #212529;">⚠️ System Maintenance</h5>
+    <div class="alert alert-danger" style="margin-bottom: 1.5rem;">
+      <strong>Danger Zone:</strong> These actions are irreversible and will permanently affect your system.
+    </div>
+
+    <div class="card" style="border: 2px solid #dc3545; background-color: #fff5f5;">
+      <div class="card-body">
+        <h6 class="card-title text-danger">Reset All Data</h6>
+        <p class="text-muted small mb-3">
+          This will permanently delete all members, access logs, and reset all lockers to available status.
+          Fingerprint templates on the device will be cleared and member associations will be removed.
+          This action cannot be undone.
+        </p>
+        <form method="post" action="/admin/reset-data" onsubmit="return confirmReset()">
+          <div class="mb-3">
+            <label for="confirm" class="form-label small text-danger">Type "RESET_ALL_DATA" to confirm:</label>
+            <input type="text" class="form-control" id="confirm" name="confirm" required>
+          </div>
+          <button type="submit" class="btn btn-danger btn-sm">
+            <i class="fas fa-trash-alt me-1"></i>Reset All Data
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card mt-3" style="border: 2px solid #ffc107; background-color: #fffbf0;">
+      <div class="card-body">
+        <h6 class="card-title text-warning">Clear Fingerprint Templates</h6>
+        <p class="text-muted small mb-3">
+          This will clear all fingerprint templates from the device without affecting member data.
+          Use this to remove orphaned templates from deleted or incomplete registrations.
+          <em>Note: Device clearing requires firmware support.</em>
+        </p>
+        <form method="post" action="/admin/clear-fingerprints" onsubmit="return confirm('Are you sure you want to clear all fingerprint templates from the device?')">
+          <button type="submit" class="btn btn-warning btn-sm">
+            <i class="fas fa-fingerprint me-1"></i>Clear Fingerprints
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
 
   <!-- Add/Edit Admin Modal -->
   <div id="adminModal" class="admin-modal">
@@ -601,5 +657,14 @@
         closeAdminModal();
       }
     });
+
+    function confirmReset() {
+      const confirmText = document.getElementById('confirm').value;
+      if (confirmText !== 'RESET_ALL_DATA') {
+        alert('Please type "RESET_ALL_DATA" exactly to confirm.');
+        return false;
+      }
+      return confirm('Are you absolutely sure you want to reset all data? This cannot be undone!');
+    }
   </script>
 {% endblock %}

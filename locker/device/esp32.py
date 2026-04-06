@@ -51,3 +51,14 @@ class ESP32DeviceController:
             locked=False,
             item_detected=bool(data.get("item_detected", False)),
         )
+
+    def start_fingerprint_enrollment(self) -> dict:
+        return self._post("/fingerprint/start-enrollment")
+
+    def clear_fingerprint_templates(self) -> bool:
+        """Clear all fingerprint templates from device."""
+        # Note: ESP32 firmware currently doesn't have HTTP server endpoints
+        # This would need to be implemented in the ESP32 firmware
+        # For now, return False to indicate the operation is not supported
+        print("ESP32DeviceController: Fingerprint clearing not implemented in firmware yet")
+        return False
