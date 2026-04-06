@@ -78,6 +78,14 @@ def init_db() -> None:
             )
             """
         )
+        # Ensure fingerprint_uid remains unique across members when supported.
+        try:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_members_fingerprint_uid ON members(fingerprint_uid)"
+            )
+        except sqlite3.OperationalError:
+            # Ignore duplicate index creation errors for existing invalid data.
+            pass
         # Initialize with 4 physical lockers only
         for i in range(1, 5):
             conn.execute(

@@ -187,6 +187,71 @@
       width: 100% !important;
     }
   }
+
+  /* Modal styles */
+  .modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    animation: fadeIn 0.3s ease;
+  }
+
+  .modal-content {
+    background-color: #fff;
+    margin: 15% auto;
+    padding: 20px;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 400px;
+    text-align: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  }
+
+  .close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  .close:hover {
+    color: #000;
+  }
+
+  .modal h2 {
+    color: #dc2626;
+    margin-bottom: 16px;
+  }
+
+  .modal p {
+    color: #374151;
+    margin-bottom: 20px;
+  }
+
+  .modal button {
+    background: #dc2626;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .modal button:hover {
+    background: #b91c1c;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 </style>
 
 <nav class="als-nav">
@@ -274,7 +339,7 @@
 
       <!-- Start Enrollment Button -->
       <div id="start-enrollment-section" style="text-align: center; margin: 1.5rem 0;">
-        <button id="start-enrollment-btn" class="btn-primary" style="width: auto; padding: 12px 24px; position: relative;">
+        <button id="start-enrollment-btn" type="button" class="btn-primary" style="width: auto; padding: 12px 24px; position: relative;">
           <span id="btn-text">🔐 Start Fingerprint Enrollment</span>
           <span id="btn-loading" style="display: none; margin-left: 8px;">⟳</span>
         </button>
@@ -324,6 +389,16 @@
   </div>
 </main>
 
+<!-- Error Modal -->
+<div id="error-modal" class="modal">
+  <div class="modal-content">
+    <span class="close" id="modal-close">&times;</span>
+    <h2>Enrollment Error</h2>
+    <p id="error-message">An error occurred during fingerprint enrollment.</p>
+    <button id="modal-ok-btn">OK</button>
+  </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   const statusDiv = document.getElementById('enrollment-status');
@@ -337,8 +412,32 @@ document.addEventListener('DOMContentLoaded', function() {
   const btnLoading = document.getElementById('btn-loading');
   const btnHint = document.getElementById('btn-hint');
   const cancelEnrollmentBtn = document.getElementById('cancel-enrollment-btn');
+  const errorModal = document.getElementById('error-modal');
+  const errorMessage = document.getElementById('error-message');
+  const modalClose = document.getElementById('modal-close');
+  const modalOkBtn = document.getElementById('modal-ok-btn');
   
   let pollInterval;
+  let timeoutHandle;
+  
+  // Modal functions
+  function showErrorModal(message) {
+    errorMessage.textContent = message;
+    errorModal.style.display = 'block';
+  }
+  
+  function hideErrorModal() {
+    errorModal.style.display = 'none';
+  }
+  
+  // Modal event listeners
+  modalClose.addEventListener('click', hideErrorModal);
+  modalOkBtn.addEventListener('click', hideErrorModal);
+  window.addEventListener('click', function(event) {
+    if (event.target === errorModal) {
+      hideErrorModal();
+    }
+  });
   
   // Start enrollment button click handler
   startEnrollmentBtn.addEventListener('click', async function() {
@@ -357,7 +456,10 @@ document.addEventListener('DOMContentLoaded', function() {
         body: JSON.stringify({})
       });
       
-      if (response.ok) {
+      const data = await response.json().catch(() => ({}));
+      const message = data.message || data.error || 'Failed to start enrollment. Please try again.';
+      
+      if (response.ok && data.status === 'pending') {
         // Hide start button and show status
         startEnrollmentSection.style.display = 'none';
         statusDiv.style.display = 'block';
@@ -365,7 +467,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Update status to show activation
         statusIcon.textContent = '🔄';
         statusText.textContent = 'Activating fingerprint scanner...';
-        statusDetail.textContent = 'Please wait while we connect to the device';
+        statusDetail.textContent = 'Please wait while we connect to the device.';
+        statusText.style.color = '#0f6e56';
         
         // Start polling for enrollment status
         startPolling();
@@ -374,20 +477,31 @@ document.addEventListener('DOMContentLoaded', function() {
         startEnrollmentBtn.disabled = false;
         btnText.textContent = '🔐 Start Fingerprint Enrollment';
         btnLoading.style.display = 'none';
-        btnHint.textContent = 'Click to activate the fingerprint scanner';
+        btnHint.textContent = 'Click to activate the fingerprint scanner. After the first scan, place your finger again for the final capture.';
         
-        alert('Failed to start enrollment. Please try again.');
+        showEnrollmentError(message);
       }
     } catch (error) {
       // Reset button state
       startEnrollmentBtn.disabled = false;
       btnText.textContent = '🔐 Start Fingerprint Enrollment';
       btnLoading.style.display = 'none';
-      btnHint.textContent = 'Click to activate the fingerprint scanner';
+      btnHint.textContent = 'Click to activate the fingerprint scanner. After the first scan, place your finger again for the final capture.';
       
-      alert('Error starting enrollment. Please check your connection.');
+      console.error('Enrollment start error:', error);
+      showEnrollmentError('Unable to start enrollment. Please check your connection and try again.');
     }
   });
+  
+  function showEnrollmentError(message) {
+    startEnrollmentSection.style.display = 'block';
+    statusDiv.style.display = 'none';
+    startEnrollmentBtn.disabled = false;
+    btnText.textContent = '🔐 Start Fingerprint Enrollment';
+    btnLoading.style.display = 'none';
+    btnHint.textContent = 'Click to activate the fingerprint scanner';
+    showErrorModal(message);
+  }
   
   // Cancel enrollment button click handler
   cancelEnrollmentBtn.addEventListener('click', async function() {
@@ -433,13 +547,8 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Check for enrollment errors
         if (data.error) {
-          statusIcon.textContent = '❌';
-          statusText.textContent = 'Enrollment Error';
-          statusText.style.color = '#dc2626';
-          statusDetail.textContent = data.error;
-          completeBtn.disabled = true;
           clearInterval(pollInterval);
-          
+          showErrorModal(data.error);
           // Re-enable start button after error
           setTimeout(() => {
             startEnrollmentSection.style.display = 'block';

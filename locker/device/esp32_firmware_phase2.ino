@@ -19,12 +19,12 @@
 // Locker 1: GPIO 33, 34
 // Locker 2: GPIO 35, 36
 // Locker 3: GPIO 37, 38
-// Locker 4: GPIO 39, 4 (Note: GPIO 4 is multi-purpose - may conflict with boot)
+// Locker 4: GPIO 39, 21 (Changed GPIO 4 to 21 - GPIO 4 conflicts with ADC2/WiFi)
 const int IR_SENSOR_PINS[4][2] = {
   {33, 34},   // Locker 1
   {35, 36},   // Locker 2
   {37, 38},   // Locker 3
-  {39, 4}     // Locker 4
+  {39, 21}   // Locker 4 - GPIO 21 is safe for ADC1
 };
 
 const char* WIFI_SSID = "Emelon Wifi";
@@ -81,7 +81,7 @@ const unsigned long OFFLINE_TIMEOUT = 30000;  // 30 seconds without WiFi = offli
 // Fingerprint scan permission tracking
 bool scanPermissionAllowed = false;
 unsigned long lastScanPermissionCheck = 0;
-const unsigned long SCAN_PERMISSION_POLL_INTERVAL = 1000;  // Check scan enable state every 1 second
+const unsigned long SCAN_PERMISSION_POLL_INTERVAL = 500;  // Check scan enable state every 0.5 seconds
 
 // Smart Auto-Lock Tracking
 bool lockerUnlocked[4] = {false, false, false, false};  // Relay unlocked state per locker
@@ -364,6 +364,9 @@ void setupIRSensor() {
 void irSensorTask(void * parameter) {
   // This runs on Core 1 independently - HTTP requests on Core 0 won't affect this
   
+  unsigned long lastDebugPrint = 0;
+  const unsigned long DEBUG_PRINT_INTERVAL = 5000; // Print IR status every 5 seconds
+  
   while (true) {
     // Check all 4 lockers for IR detection
     for (int locker = 0; locker < 4; locker++) {  // Check all 4 lockers
@@ -427,6 +430,21 @@ void irSensorTask(void * parameter) {
           autoLockLocker(locker);
         }
       }
+    }
+    
+    // Periodic debug output of all 8 IR sensors individually
+    if (millis() - lastDebugPrint > DEBUG_PRINT_INTERVAL) {
+      Serial.println("🔍 All 8 IR Sensors Status:");
+      int sensorIndex = 1;
+      for (int locker = 0; locker < 4; locker++) {
+        for (int sensor = 0; sensor < 2; sensor++) {
+          int irValue = analogRead(IR_SENSOR_PINS[locker][sensor]);
+          bool detected = (irValue < IR_DETECTION_THRESHOLD);
+          Serial.println("  IR" + String(sensorIndex) + " (" + LOCKER_NAMES[locker] + "): " + String(irValue) + " | Detected: " + (detected ? "YES" : "NO"));
+          sensorIndex++;
+        }
+      }
+      lastDebugPrint = millis();
     }
     
     // Check IR frequently but yield to other tasks
@@ -717,7 +735,8 @@ void readAndProcessFingerprint() {
     String uid = String(finger.fingerID);
     Serial.println("🔐 Fingerprint recognized! ID=" + uid);
     sendFingerprintToBackend(uid);
-    delay(1000);
+    // Reduced delay to allow faster subsequent scans
+    delay(500);
   } else if (p == FINGERPRINT_NOTFOUND) {
     Serial.println("  → Fingerprint not in database");
     showError("FP NOT FOUND");
@@ -921,6 +940,21 @@ void stopFingerprintEnrollment() {
   Serial.println("🔐 Enrollment mode stopped");
 }
 
+bool isDuplicateFingerprint() {
+  uint8_t p = finger.fingerSearch();
+  if (p == FINGERPRINT_OK) {
+    Serial.println("   ⚠ Duplicate fingerprint detected during enrollment.");
+    return true;
+  }
+  if (p == FINGERPRINT_NOTFOUND) {
+    return false;
+  }
+
+  Serial.print("   ⚠ Finger search error during duplicate check: 0x");
+  Serial.println(p, HEX);
+  return false;
+}
+
 void processFingerprintEnrollment() {
   if (!enrollmentMode) {
     return;
@@ -974,6 +1008,15 @@ void processFingerprintEnrollment() {
       p = finger.image2Tz(2);
       if (p == FINGERPRINT_OK) {
         Serial.println("   ✓ Second scan captured.");
+
+        // Check for duplicate fingerprint before creating and storing a new model.
+        if (isDuplicateFingerprint()) {
+          Serial.println("   ✗ Enrollment cancelled because fingerprint is already registered.");
+          showError("DUPLICATE FINGERPRINT");
+          stopFingerprintEnrollment();
+          break;
+        }
+
         p = finger.createModel();
         if (p == FINGERPRINT_OK) {
           finger.getTemplateCount();
@@ -1057,11 +1100,25 @@ bool sendFingerprintEnrollmentToBackend(String templateId, int step) {
       showError("ENROLLMENT RESPONSE INVALID");
     } else {
       String status = respDoc["status"] | "";
+      String errorMsg = respDoc["error"] | "";
       if (status == "first_scan_complete" || status == "enrolled") {
         Serial.println("   ✓ Fingerprint enrollment step successfully reported to backend.");
         success = true;
+      } else if (errorMsg == "duplicate_fingerprint") {
+        Serial.println("   ⚠ Duplicate fingerprint detected. Deleting template and stopping enrollment.");
+        // Delete the newly stored template
+        if (step == 2 && templateId.toInt() > 0) {
+          uint8_t deleteResult = finger.deleteModel(templateId.toInt());
+          if (deleteResult == FINGERPRINT_OK) {
+            Serial.println("   ✓ Template deleted successfully.");
+          } else {
+            Serial.println("   ✗ Failed to delete template.");
+          }
+        }
+        showError("DUPLICATE FINGERPRINT");
+        stopFingerprintEnrollment();
       } else {
-        Serial.println("   ✗ Unexpected enrollment response status: " + status);
+        Serial.println("   ✗ Unexpected enrollment response status: " + status + ", error: " + errorMsg);
         showError("ENROLLMENT FAILED");
       }
     }

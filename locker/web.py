@@ -249,6 +249,14 @@ def create_app() -> Flask:
             print(f"First fingerprint scan completed, uid={uid}")
             return {"status": "first_scan_complete", "fingerprint_uid": uid}
         else:
+            # Check for duplicate fingerprint before accepting enrollment
+            with connect() as conn:
+                existing = conn.execute("SELECT id, full_name FROM members WHERE fingerprint_uid = ?", (uid,)).fetchone()
+                if existing:
+                    fingerprint_enrollment_state["error"] = f"Fingerprint already registered to {existing[1]}."
+                    print(f"Duplicate fingerprint detected, uid={uid}, existing user: {existing[1]}")
+                    return {"error": "duplicate_fingerprint"}
+            
             # Enrollment completed (second scan)
             fingerprint_enrollment_state["enrolled_uid"] = uid
             fingerprint_enrollment_state["pending"] = False
@@ -264,6 +272,13 @@ def create_app() -> Flask:
                 )
             
             return {"status": "enrolled", "fingerprint_uid": uid}
+
+    def _reset_enrollment_state():
+        fingerprint_enrollment_state["pending"] = False
+        fingerprint_enrollment_state["enrolled_uid"] = None
+        fingerprint_enrollment_state["step"] = 0
+        fingerprint_enrollment_state["error"] = None
+        fingerprint_enrollment_state["active"] = False
 
     @app.post("/device/fingerprint/request-enrollment")
     def device_fingerprint_request_enrollment():
@@ -362,6 +377,15 @@ def create_app() -> Flask:
         scan_control_state["last_enabled"] = None
         return {"status": "scan_disabled"}
 
+    @app.post("/api/access/clear-locker-state")
+    def api_clear_locker_state():
+        """Clear locker access state when user returns to home page."""
+        access_status_state["state"] = "waiting"
+        access_status_state["locker_id"] = None
+        access_status_state["message"] = "Awaiting fingerprint scan"
+        access_status_state["updated_at"] = None
+        return {"status": "locker_state_cleared"}
+
     @app.get("/api/access/scan-enabled")
     def api_scan_enabled():
         """Check if fingerprint scanning is currently enabled."""
@@ -418,7 +442,8 @@ def create_app() -> Flask:
 
     @app.get("/user/register")
     def user_register_form():
-        return render_template("pages/user_register.html")
+        error = session.pop("registration_error", None)
+        return render_template("pages/user_register.html", error=error)
 
     @app.post("/user/register")
     def user_register_submit():
@@ -564,6 +589,19 @@ def create_app() -> Flask:
             return redirect(url_for("user_enroll_fingerprint"))
         
         with connect() as conn:
+            # Prevent duplicate fingerprint registration across different users.
+            existing_fingerprint = conn.execute(
+                "SELECT id, full_name FROM members WHERE fingerprint_uid = ?",
+                (fingerprint_uid,),
+            ).fetchone()
+            if existing_fingerprint:
+                session["registration_error"] = (
+                    "Ang fingerprint na ito ay naka-rehistro na sa ibang user. "
+                    "Kung sa tingin mo ay mali, kontakin ang admin."
+                )
+                _clear_registration_draft()
+                return redirect(url_for("user_register_form"))
+
             # Check for role conflict: prevent registering as member if person already has RFID as guest
             role_conflict = conn.execute(
                 "SELECT id, member_type FROM members WHERE full_name = ? AND rfid_uid IS NOT NULL",
@@ -578,7 +616,7 @@ def create_app() -> Flask:
                 session["registration_error"] = "You are already registered as a guest with RFID access. Please contact admin if you need to change your access method."
                 _clear_registration_draft()
                 return redirect(url_for("user_register_form"))
-            
+
             # Check if this person already has a pending registration
             existing = conn.execute(
                 """

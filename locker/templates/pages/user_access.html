@@ -54,7 +54,7 @@
           </div>
           <div style="font-size:12px; color:#7a8fa6;">Your locker is being unlocked...</div>
           <div id="auto-return-notice" style="font-size:11px; color:#0f6e56; margin-top:8px; font-weight:600;">
-            Returning to scanner in <span id="countdown">10</span> seconds...
+            Returning to home page in <span id="countdown">10</span> seconds...
           </div>
         </div>
 
@@ -66,12 +66,12 @@
             <li>Open your assigned locker</li>
             <li>Retrieve your items</li>
             <li>Close and lock the locker</li>
-            <li>The system will automatically return to scanning mode</li>
+            <li>The system will automatically return to the home page</li>
           </ol>
         </div>
 
         <!-- Back button -->
-        <button type="button" onclick="window.location.href='/'"
+        <button type="button" id="back-home-btn"
                 style="width:100%; padding:12px 16px; border-radius:12px; border:1.5px solid #e2e8f0; background:#fff; font-family:inherit; font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#7a8fa6; cursor:pointer; transition:all 0.15s ease;"
                 onmouseover="this.style.background='#f4f6f9';this.style.borderColor='#ccd5de'"
                 onmouseout="this.style.background='#fff';this.style.borderColor='#e2e8f0'">
@@ -91,7 +91,7 @@
         <div style="font-size:11px; color:#dc2626; margin:8px 0; font-weight:600;">
           Auto-retrying in 5 seconds...
         </div>
-        <button type="button" onclick="returnToScanning()"
+        <button type="button" id="try-again-btn"
                 style="width:100%; margin-top:1.5rem; padding:12px 16px; border-radius:12px; border:1.5px solid #e2e8f0; background:#fff; font-family:inherit; font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#7a8fa6; cursor:pointer; transition:all 0.15s ease;"
                 onmouseover="this.style.background='#f4f6f9';this.style.borderColor='#ccd5de'"
                 onmouseout="this.style.background='#fff';this.style.borderColor='#e2e8f0'">
@@ -111,6 +111,8 @@ document.addEventListener('DOMContentLoaded', function() {
   const scannerStatus = document.getElementById('scanner-status');
   const countdownElement = document.getElementById('countdown');
   const autoReturnNotice = document.getElementById('auto-return-notice');
+  const backHomeBtn = document.getElementById('back-home-btn');
+  const tryAgainBtn = document.getElementById('try-again-btn');
   
   let pollInterval = null;
   let heartbeatInterval = null;
@@ -118,8 +120,22 @@ document.addEventListener('DOMContentLoaded', function() {
   let scanStatusText = document.getElementById('scan-status-text');
   let autoReturnTimeout = null;
 
+  function resetToScanningState() {
+    scanningState.style.display = 'block';
+    successState.style.display = 'none';
+    errorState.style.display = 'none';
+    scannerStatus.style.display = 'none';
+    scanStatusText.textContent = 'Waiting for scanner to activate...';
+  }
+
   // Auto-return to scanning state after successful unlock
   function startAutoReturn() {
+    // Clear any existing countdown timers first
+    if (autoReturnTimeout) {
+      clearInterval(autoReturnTimeout);
+      autoReturnTimeout = null;
+    }
+    
     let countdown = 10;
     countdownElement.textContent = countdown;
     autoReturnNotice.style.display = 'block';
@@ -130,7 +146,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
       if (countdown <= 0) {
         clearInterval(autoReturnTimeout);
-        returnToScanning();
+        autoReturnTimeout = null;
+        goHome();  // Return to home page for next member
       }
     }, 1000);
   }
@@ -151,15 +168,55 @@ document.addEventListener('DOMContentLoaded', function() {
       autoReturnTimeout = null;
     }
 
-    // Disable scanning before leaving
-    await disableScanning();
+    // Return to scanning mode on the same page for the next member
+    successState.style.display = 'none';
+    errorState.style.display = 'none';
+    scanningState.style.display = 'block';
+    scanStatusText.textContent = 'Returning to scanning mode...';
 
-    // Redirect to home page - next member can access from there
+    await enableScanning();
+
+    heartbeatInterval = setInterval(sendHeartbeat, 15000);
+    pollInterval = setInterval(pollForAccess, 500);
+    pollForAccess();
+  }
+
+  function goHome() {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
+    if (autoReturnTimeout) {
+      clearInterval(autoReturnTimeout);
+      autoReturnTimeout = null;
+    }
+    disableScanning();
+    
+    // Clear locker state so next member can scan
+    fetch('/api/access/clear-locker-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    }).catch(err => console.log('Error clearing locker state:', err));
+    
     window.location.href = '/';
   }
 
+  // Add event listener for back home button
+  backHomeBtn.addEventListener('click', goHome);
+
+  // Add event listener for try again button
+  tryAgainBtn.addEventListener('click', returnToScanning);
+
   // Enable fingerprint scanning when this page loads
   async function enableScanning() {
+    // Show activating state immediately
+    scanStatusText.textContent = 'Activating fingerprint scanner...';
+    scannerStatus.style.display = 'block';
+    
     try {
       const response = await fetch('/api/access/enable-scan', {
         method: 'POST',
@@ -288,7 +345,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
-  // Enable scanning immediately when page loads
+  // Reset UI and enable scanning immediately when page loads
+  resetToScanningState();
   enableScanning();
   
   // Send heartbeat every 15 seconds to keep scanning enabled
@@ -298,6 +356,21 @@ document.addEventListener('DOMContentLoaded', function() {
   // Start polling every 500ms (better responsiveness for unlock detection)
   pollInterval = setInterval(pollForAccess, 500);
   pollForAccess();
+
+  // If the page is restored from bfcache, reset the access page state
+  window.addEventListener('pageshow', function(event) {
+    if (event.persisted) {
+      resetToScanningState();
+      enableScanning();
+      if (!heartbeatInterval) {
+        heartbeatInterval = setInterval(sendHeartbeat, 15000);
+      }
+      if (!pollInterval) {
+        pollInterval = setInterval(pollForAccess, 500);
+        pollForAccess();
+      }
+    }
+  });
 
   // Cleanup when user leaves page
   window.addEventListener('beforeunload', function() {

@@ -910,6 +910,7 @@ def admin_lockers():
             "total": len(lockers),
             "available": sum(1 for l in lockers if l["status"] == "available"),
             "occupied": sum(1 for l in lockers if l["status"] == "occupied"),
+            "assigned": sum(1 for l in lockers if l["assigned_to"] is not None)
         }
     
     return render_template(
@@ -1095,6 +1096,14 @@ def admin_settings():
         return guard
     
     settings = load_settings()
+    admin_users = [
+        {
+            "username": "admin",
+            "email": "admin@example.com",
+            "role": "Super Admin",
+            "status": "Active",
+        }
+    ]
     
     return render_template(
         "admin/pages/admin_settings.html",
@@ -1102,6 +1111,7 @@ def admin_settings():
         current_page="settings",
         admin_username=session.get("admin_username"),
         now=datetime.now(),
+        admin_users=admin_users,
     )
 
 

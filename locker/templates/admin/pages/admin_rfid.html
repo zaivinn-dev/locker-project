@@ -1,6 +1,6 @@
 {% extends "admin/layout/admin.html" %}
 
-{% block admin_title %}Guest RFID Access{% endblock %}
+{% block admin_title %}Guest Access{% endblock %}
 
 {% block admin_extra_head %}
 <style>
@@ -23,13 +23,14 @@
 
 {% block admin_content %}
   <!-- Header -->
-  <div class="d-flex justify-content-between align-items-center mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-column flex-sm-row gap-3">
     <div>
       <div class="text-muted" style="letter-spacing:0.14em; text-transform:uppercase; font-size:0.75rem;">Admin</div>
-      <h5 class="mb-0">Guest RFID Access</h5>
+      <h1 class="h4 mb-0">Guest Access Management</h1>
+      <p class="text-muted mb-0" style="font-size:0.92rem;">Manage temporary guest cards, locker assignments, and access duration.</p>
     </div>
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createGuestModal">
-      <i class="bi bi-plus-lg"></i> Create Guest
+    <button class="btn btn-primary px-4" data-bs-toggle="modal" data-bs-target="#createGuestModal">
+      <i class="bi bi-plus-lg me-1"></i> Create Guest
     </button>
   </div>
 
@@ -143,7 +144,21 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="7" class="text-center text-muted py-4">No guests yet</td>
+                <td colspan="7" class="p-4">
+                  <div class="text-center py-4">
+                    <div class="mb-3">
+                      <span class="badge bg-info text-dark">No guest access cards found</span>
+                    </div>
+                    {% if q %}
+                      <p class="mb-2">No results for <strong>{{ q }}</strong>. Try a different name, card UID, or locker.</p>
+                    {% else %}
+                      <p class="mb-2">You don't have any guest access cards yet.</p>
+                    {% endif %}
+                    <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createGuestModal">
+                      Add your first guest access card
+                    </button>
+                  </div>
+                </td>
               </tr>
             {% endif %}
           </tbody>
@@ -151,7 +166,6 @@
       </div>
     </div>
   </div>
-</div>
 
 <!-- Create Guest Modal -->
 <div class="modal fade" id="createGuestModal" tabindex="-1">
@@ -163,6 +177,7 @@
             </div>
             <form id="createGuestForm" method="post" action="{{ url_for('admin.admin_create_guest') }}">
                 <div class="modal-body">
+                    <div id="createGuestAlert" class="alert alert-danger d-none" role="alert"></div>
                     <div class="mb-3">
                         <label for="guestName" class="form-label">Guest Name</label>
                         <input type="text" class="form-control" id="guestName" name="full_name" 
@@ -170,27 +185,28 @@
                     </div>
                     <div class="mb-3">
                         <label for="guestRfid" class="form-label">RFID Card UID</label>
-                        <select class="form-select" id="guestRfid" name="rfid_uid" required>
-                            <option value="">-- Select RFID Card --</option>
-                            <option value="BB31D306">BB31D306</option>
-                            <option value="96FDFEA9">96FDFEA9</option>
-                            <option value="98C357AD">98C357AD</option>
-                            <option value="A84929AD">A84929AD</option>
-                            <option value="C849D9AD">C849D9AD</option>
-                            <option value="A89115AD">A89115AD</option>
-                            <option value="26058FB9">26058FB9</option>
-                            <option value="3633E9B9">3633E9B9</option>
-                            <option value="065C97AA">065C97AA</option>
-                            <option value="E49113BB">E49113BB</option>
-                        </select>
-                        <small class="text-muted">Select a pre-registered RFID card</small>
+                        <input type="text" class="form-control" id="guestRfid" name="rfid_uid"
+                               placeholder="e.g. BB31D306" list="rfidSuggestions" autocomplete="off" required>
+                        <datalist id="rfidSuggestions">
+                            <option value="BB31D306"></option>
+                            <option value="96FDFEA9"></option>
+                            <option value="98C357AD"></option>
+                            <option value="A84929AD"></option>
+                            <option value="C849D9AD"></option>
+                            <option value="A89115AD"></option>
+                            <option value="26058FB9"></option>
+                            <option value="3633E9B9"></option>
+                            <option value="065C97AA"></option>
+                            <option value="E49113BB"></option>
+                        </datalist>
+                        <small class="text-muted">Enter the guest RFID card UID. Use the scanner or paste the UID from the card.</small>
                     </div>
                     <div class="mb-3">
                         <label for="guestLocker" class="form-label">Assign to Locker</label>
                         <select class="form-select" id="guestLocker" name="locker_id" required>
-                            <option value="">-- Select available locker --</option>
-                            <!-- Options will be populated by JavaScript -->
+                            <option value="">-- Loading available lockers... --</option>
                         </select>
+                        <small id="guestLockerHelp" class="form-text text-muted">Only lockers that are currently available will appear here.</small>
                     </div>
                     <div class="mb-3">
                         <label for="guestDuration" class="form-label">Access Duration</label>
@@ -213,106 +229,139 @@
     </div>
 </div>
 
+<!-- Guest Creation Success Modal -->
+<div class="modal fade" id="guestSuccessModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title">Guest Created</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="text-center mb-3">
+                    <i class="bi bi-check-circle-fill text-success" style="font-size: 3rem;"></i>
+                </div>
+                <p class="mb-3 text-center">The guest has been created successfully and assigned to the locker.</p>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item"><strong>Name:</strong> <span id="guestSuccessName"></span></li>
+                    <li class="list-group-item"><strong>RFID:</strong> <span id="guestSuccessRfid"></span></li>
+                    <li class="list-group-item"><strong>Locker:</strong> #<span id="guestSuccessLocker"></span></li>
+                    <li class="list-group-item"><strong>Duration:</strong> <span id="guestSuccessDuration"></span></li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-success" data-bs-dismiss="modal">Done</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
-// RFID to Locker mapping
-const rfidLockerMap = {
-    'BB31D306': 1,
-    '96FDFEA9': 2,
-    '98C357AD': 3,
-    'A84929AD': 4,
-    'C849D9AD': 1,
-    'A89115AD': 2,
-    '26058FB9': 3,
-    '3633E9B9': 4,
-    '065C97AA': 1,
-    'E49113BB': 2
-};
+function setCreateGuestAlert(message, type = 'danger') {
+    const alertBox = document.getElementById('createGuestAlert');
+    alertBox.className = `alert alert-${type}`;
+    alertBox.textContent = message;
+    alertBox.classList.remove('d-none');
+}
 
-// Auto-populate locker when RFID card is selected
-document.getElementById('guestRfid').addEventListener('change', function() {
-    const selectedRfid = this.value;
-    const lockerSelect = document.getElementById('guestLocker');
-    
-    if (selectedRfid && rfidLockerMap[selectedRfid]) {
-        const lockerId = rfidLockerMap[selectedRfid];
-        lockerSelect.value = lockerId;
-    }
-});
+function clearCreateGuestAlert() {
+    const alertBox = document.getElementById('createGuestAlert');
+    alertBox.classList.add('d-none');
+    alertBox.textContent = '';
+}
 
-// Load available lockers when modal opens
-document.getElementById('createGuestModal').addEventListener('show.bs.modal', function() {
-    // Fetch available lockers from the server
+function populateAvailableLockers() {
+    const select = document.getElementById('guestLocker');
+    select.innerHTML = '<option value="">-- Select available locker --</option>';
+    select.disabled = true;
+    document.getElementById('guestLockerHelp').textContent = 'Loading available lockers...';
+
     fetch('{{ url_for("admin.admin_get_available_lockers") }}')
-        .then(r => r.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Unable to load lockers');
+            }
+            return response.json();
+        })
         .then(data => {
-            const select = document.getElementById('guestLocker');
+            select.disabled = false;
             select.innerHTML = '<option value="">-- Select available locker --</option>';
-            if (data.lockers && data.lockers.length > 0) {
+            if (Array.isArray(data.lockers) && data.lockers.length > 0) {
                 data.lockers.forEach(locker => {
                     const opt = document.createElement('option');
                     opt.value = locker.id;
                     opt.textContent = `Locker ${locker.id} - ${locker.label}`;
                     select.appendChild(opt);
                 });
+                document.getElementById('guestLockerHelp').textContent = 'Only lockers that are currently available will appear here.';
             } else {
                 const opt = document.createElement('option');
                 opt.value = '';
                 opt.textContent = 'No available lockers';
                 opt.disabled = true;
                 select.appendChild(opt);
+                select.disabled = true;
+                document.getElementById('guestLockerHelp').textContent = 'No lockers are available right now.';
             }
         })
         .catch(err => {
             console.error('Error loading lockers:', err);
-            // Fallback: show first 4 lockers
-            const select = document.getElementById('guestLocker');
             select.innerHTML = '<option value="">-- Select available locker --</option>';
-            [1, 2, 3, 4].forEach(id => {
-                const opt = document.createElement('option');
-                opt.value = id;
-                opt.textContent = `Locker ${id}`;
-                select.appendChild(opt);
-            });
+            select.disabled = false;
+            document.getElementById('guestLockerHelp').textContent = 'Unable to load lockers right now; try again later.';
         });
+}
+
+// Load available lockers when modal opens
+const createGuestModal = document.getElementById('createGuestModal');
+createGuestModal.addEventListener('show.bs.modal', function() {
+    clearCreateGuestAlert();
+    document.getElementById('createGuestForm').reset();
+    populateAvailableLockers();
 });
 
 document.getElementById('createGuestForm').addEventListener('submit', function(e) {
     e.preventDefault();
-    
+    clearCreateGuestAlert();
+
     const formData = new FormData(this);
     const guestName = formData.get('full_name');
     const guestRfid = formData.get('rfid_uid');
     const guestLocker = formData.get('locker_id');
-    const duration = parseInt(formData.get('duration_hours'));
-    
+    const duration = parseInt(formData.get('duration_hours'), 10);
+
     fetch('{{ url_for("admin.admin_create_guest") }}', {
         method: 'POST',
-        body: formData
+        body: formData,
     })
-    .then(r => {
-        if (r.ok) return r.json();
-        throw new Error('Failed to create guest');
-    })
-    .then(data => {
-        // Close the create modal
-        const createModal = bootstrap.Modal.getInstance(document.getElementById('createGuestModal'));
-        createModal.hide();
-        
-        // Show success modal with guest details
-        showGuestModal({
-            name: guestName,
-            rfid_uid: guestRfid,
-            locker_id: guestLocker,
-            duration: duration
-        });
-        
-        // Reload page after modal closes
-        document.getElementById('guestModal').addEventListener('hidden.bs.modal', function() {
-            location.reload();
-        }, { once: true });
+    .then(response => response.json().then(payload => ({ status: response.status, payload })))
+    .then(({ status, payload }) => {
+        if (status >= 200 && status < 300) {
+            const createModal = bootstrap.Modal.getInstance(createGuestModal);
+            createModal.hide();
+
+            document.getElementById('guestSuccessName').textContent = guestName;
+            document.getElementById('guestSuccessRfid').textContent = guestRfid;
+            document.getElementById('guestSuccessLocker').textContent = guestLocker;
+            const durationLabel = duration === 1 ? '1 hour' : `${duration} hours`;
+            document.getElementById('guestSuccessDuration').textContent = durationLabel;
+
+            const successModal = new bootstrap.Modal(document.getElementById('guestSuccessModal'));
+            successModal.show();
+
+            document.getElementById('guestSuccessModal').addEventListener('hidden.bs.modal', function() {
+                location.reload();
+            }, { once: true });
+
+            return;
+        }
+
+        const message = payload && payload.error ? payload.error : 'Unable to create guest access.';
+        setCreateGuestAlert(message, 'warning');
     })
     .catch(err => {
-        alert('Error: ' + err.message);
+        console.error('Create guest failed:', err);
+        setCreateGuestAlert('Unexpected error while creating guest access. Please try again.', 'danger');
     });
 });
 </script>

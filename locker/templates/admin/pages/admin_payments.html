@@ -4,26 +4,23 @@
 
 {% block admin_extra_head %}
 <style>
-  .kpi-card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 0.5rem; }
-  .kpi-number { font-size: 1.8rem; font-weight: 700; color: var(--brand-blue); }
-  .kpi-label { color: #6c757d; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
-  .table-wrapper { max-height: 500px; overflow-y: auto; }
-  
-  .payment-type-initial {
-    background-color: #d4edda;
-    color: #155724;
-    font-size: 0.7rem;
-  }
-  .payment-type-renewal {
-    background-color: #cce5ff;
-    color: #004085;
-    font-size: 0.7rem;
-  }
-  .payment-type-manual_payment {
-    background-color: #fff3cd;
-    color: #856404;
-    font-size: 0.7rem;
-  }
+  .kpi-card { border: none; border-left: 4px solid #0d6efd; box-shadow: 0 2px 12px rgba(0,0,0,0.08); border-radius: 0.75rem; }
+  .kpi-number { font-size: 2rem; font-weight: 700; color: #212529; }
+  .kpi-label { color: #6c757d; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+  .kpi-note { font-size: 0.8rem; color: #6c757d; }
+  .table-wrapper { max-height: 620px; overflow-y: auto; }
+  .table-wrapper table { min-width: 920px; }
+  .table thead th { background: #f8f9fa; border-bottom: 2px solid #dee2e6; }
+  .table tbody tr:hover { background-color: #f4f6fb; }
+  .payment-type-initial, .payment-type-renewal, .payment-type-manual_payment { font-size: 0.75rem; padding: 0.35rem 0.55rem; border-radius: 0.75rem; }
+  .payment-type-initial { background-color: #d4edda; color: #155724; }
+  .payment-type-renewal { background-color: #cce5ff; color: #004085; }
+  .payment-type-manual_payment { background-color: #fff3cd; color: #856404; }
+  .payment-type-other { background-color: #e2e3e5; color: #495057; }
+  .access-log-detail { white-space: normal; word-break: break-word; }
+  .payment-card-title { color: #0d6efd; }
+  .payment-amount { font-size: 0.95rem; }
+  .text-amount { font-weight: 700; }
 </style>
 {% endblock %}
 
@@ -35,31 +32,46 @@
   </div>
 
   <!-- KPI Cards -->
-  <div class="row g-2 mb-4">
-    <div class="col-6 col-lg-3">
+  <div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-4">
       <div class="card kpi-card">
         <div class="card-body p-3">
-          <div class="kpi-label">Total Revenue</div>
-          <div class="kpi-number" style="font-size: 1.3rem;">₱{{ "{:,}".format(total_revenue or 0) }}</div>
-          <small class="text-muted">All time</small>
+          <div class="d-flex align-items-start justify-content-between mb-2">
+            <div>
+              <div class="kpi-label">Total Revenue</div>
+              <div class="kpi-number">₱{{ "{:,}".format(total_revenue or 0) }}</div>
+            </div>
+            <i class="fas fa-wallet fa-lg text-muted"></i>
+          </div>
+          <div class="kpi-note">All time</div>
         </div>
       </div>
     </div>
-    <div class="col-6 col-lg-3">
+    <div class="col-sm-6 col-lg-4">
       <div class="card kpi-card">
         <div class="card-body p-3">
-          <div class="kpi-label">Total Payments</div>
-          <div class="kpi-number">{{ payments|length }}</div>
-          <small class="text-muted">Transactions</small>
+          <div class="d-flex align-items-start justify-content-between mb-2">
+            <div>
+              <div class="kpi-label">Total Payments</div>
+              <div class="kpi-number">{{ payments|length }}</div>
+            </div>
+            <i class="fas fa-receipt fa-lg text-muted"></i>
+          </div>
+          <div class="kpi-note">Transactions</div>
         </div>
       </div>
     </div>
-    <div class="col-6 col-lg-3">
+    <div class="col-sm-6 col-lg-4">
       <div class="card kpi-card">
         <div class="card-body p-3">
-          <div class="kpi-label">Avg Payment</div>
-          <div class="kpi-number" style="font-size: 1.3rem;">₱{% if payments|length > 0 %}{{ "{:,.0f}".format(total_revenue / payments|length) }}{% else %}0{% endif %}</div>
-          <small class="text-muted">Per transaction</small>
+          <div class="d-flex align-items-start justify-content-between mb-2">
+            <div>
+              <div class="kpi-label">Avg Payment</div>
+              <div class="kpi-number">₱{% if payments|length > 0 %}{{ "{:,.0f}".format(total_revenue / payments|length) }}{% else %}0{% endif %}</div>
+            </div>
+            <i class="fas fa-chart-line fa-lg text-muted"></i>
+          </div>
+          <div class="kpi-note">Per transaction</div>
         </div>
       </div>
     </div>
@@ -89,17 +101,17 @@
               <tr>
                 <td class="text-muted small">{{ p["id"] }}</td>
                 <td style="font-size: 0.9rem;">{{ p["full_name"] }}</td>
-                <td class="fw-bold">₱{{ p["amount"] }}</td>
+                <td class="text-amount">₱{{ "{:,}".format(p["amount"]) }}</td>
                 <td>
-                  <span class="badge payment-type-{{ p['payment_type'] }}">
-                    {{ p["payment_type"].replace("_", " ").title() }}
+                  <span class="badge payment-type-{{ p['payment_type'] if p['payment_type'] else 'other' }}">
+                    {{ p["payment_type"].replace("_", " ")|title if p["payment_type"] else 'Other' }}
                   </span>
                 </td>
                 <td class="text-muted small">{{ p["payment_date"] }}</td>
-                <td class="text-muted small">{{ p["notes"] or "-" }}</td>
+                <td class="text-muted small access-log-detail">{{ p["notes"] or "-" }}</td>
               </tr>
             {% else %}
-              <tr><td colspan="6" class="text-center text-muted py-3 small">No payments recorded yet.</td></tr>
+              <tr><td colspan="6" class="text-center text-muted py-5 small">No payments recorded yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>

@@ -2,10 +2,65 @@
 
 {% block admin_extra_head %}
 <style>
-  .kpi-card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 0.5rem; }
-  .kpi-number { font-size: 2rem; font-weight: 700; color: var(--brand-blue); }
-  .kpi-label { color: #6c757d; font-size: 0.85rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
-  .chart-wrapper { max-height: 280px; overflow-y: auto; }
+  .kpi-card {
+    border: none;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    border-radius: 0.85rem;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .kpi-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+  }
+  .kpi-number {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #212529;
+  }
+  .kpi-label {
+    color: #6c757d;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.6rem;
+  }
+  .kpi-note {
+    font-size: 0.85rem;
+    color: #6c757d;
+  }
+  .chart-wrapper {
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .table-sm th,
+  .table-sm td {
+    padding: 0.7rem 0.75rem;
+  }
+  .table thead th {
+    background-color: #f8f9fa;
+    border-bottom: 2px solid #dee2e6;
+  }
+  .table tbody tr:hover {
+    background-color: #f4f6fb;
+  }
+  .badge-action {
+    background-color: #e9ecef;
+    color: #495057;
+    font-size: 0.75rem;
+    padding: 0.35rem 0.65rem;
+    border-radius: 0.75rem;
+  }
+  .summary-card {
+    border: none;
+    border-radius: 1rem;
+    background: #f8f9ff;
+  }
+  .summary-card p {
+    margin-bottom: 0;
+    color: #495057;
+    line-height: 1.6;
+  }
 </style>
 {% endblock %}
 
@@ -70,25 +125,30 @@
 
   <!-- Revenue & Activity Row -->
   <div class="row g-3 mb-4">
-    <div class="col-lg-6">
-      <div class="card shadow-sm rounded-3">
-        <div class="card-body">
-          <h6 class="card-title mb-3">Monthly Revenue (Last 30 Days)</h6>
-          <div class="mb-3">
-            <div class="display-6" style="color: #28a745; font-weight: 700;">₱{{ "{:,}".format(stats.monthly_revenue) }}</div>
-            <small class="text-muted">{{ stats.monthly_access_count }} payment(s) recorded</small>
-          </div>
+    <div class="col-sm-6 col-lg-4">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Monthly Revenue</div>
+          <div class="kpi-number">₱{{ "{:,}".format(stats.monthly_revenue) }}</div>
+          <div class="kpi-note">Last 30 days</div>
         </div>
       </div>
     </div>
-    <div class="col-lg-6">
-      <div class="card shadow-sm rounded-3">
-        <div class="card-body">
-          <h6 class="card-title mb-3">Total Access Events</h6>
-          <div class="mb-3">
-            <div class="display-6" style="color: var(--brand-blue); font-weight: 700;">{{ stats.total_access_logs }}</div>
-            <small class="text-muted">All system events logged</small>
-          </div>
+    <div class="col-sm-6 col-lg-4">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Payments Recorded</div>
+          <div class="kpi-number">{{ stats.monthly_access_count }}</div>
+          <div class="kpi-note">In the last 30 days</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-sm-12 col-lg-4">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Total Access Events</div>
+          <div class="kpi-number">{{ stats.total_access_logs }}</div>
+          <div class="kpi-note">System events logged</div>
         </div>
       </div>
     </div>
@@ -162,21 +222,22 @@
   </div>
 
   <!-- Summary Card -->
-  <div class="card shadow-sm rounded-3" style="background: linear-gradient(135deg, #{0}4 0%, rgba(255,255,255,0) 100%); border: 1px solid #e9ecef;">
+  <div class="card summary-card shadow-sm rounded-3">
     <div class="card-body">
-      <div class="d-flex gap-3">
+      <div class="d-flex align-items-start gap-3">
         <div style="flex-shrink: 0;">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--brand-blue)" stroke-width="2">
-            <path d="M3 3v18h18"/>
-            <path d="M3 15h6v6H3z"/>
-            <path d="M12 9h6v12h-6z"/>
+          <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" stroke-width="2">
+            <rect x="3" y="3" width="7" height="7" rx="1"/>
+            <rect x="14" y="3" width="7" height="18" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/>
           </svg>
         </div>
         <div>
           <h6 class="mb-2">Summary</h6>
-          <p class="mb-0 text-muted" style="font-size: 0.9rem;">
-            <strong>{{ stats.total_members }}</strong> registered members and <strong>{{ stats.total_guests }}</strong> guest accesses.
-            <strong>{{ stats.approved_members }}</strong> members are approved and paid. Monthly revenue: <strong>₱{{ "{:,}".format(stats.monthly_revenue) }}</strong>
+          <p>
+            <strong>{{ stats.total_members }}</strong> registered members and <strong>{{ stats.total_guests }}</strong> guests.
+            <strong>{{ stats.approved_members }}</strong> members are approved and paid.
+            Monthly revenue is <strong>₱{{ "{:,}".format(stats.monthly_revenue) }}</strong> with <strong>{{ stats.monthly_access_count }}</strong> recorded payments.
           </p>
         </div>
       </div>

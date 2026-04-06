@@ -3,16 +3,42 @@
 {% block admin_extra_head %}
 <style>
   .activity-wrapper {
-    max-height: 600px;
+    max-height: 640px;
     overflow-y: auto;
   }
   .badge-admin { background-color: #cce5ff; color: #004085; }
   .badge-system { background-color: #fff3cd; color: #856404; }
+  .badge-other { background-color: #e2e3e5; color: #495057; }
   .table th {
     background-color: #f8f9fa;
     border-bottom: 2px solid #dee2e6;
     font-weight: 600;
     color: #495057;
+  }
+  .table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #f8f9fa;
+  }
+  .table tbody tr:hover {
+    background: #f5f7fb;
+  }
+  .filter-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6c757d;
+  }
+  .activity-detail {
+    white-space: normal;
+    word-break: break-word;
+  }
+  .activity-action {
+    font-size: 0.85rem;
+    color: #0d6efd;
+    font-weight: 600;
   }
 </style>
 {% endblock %}
@@ -30,13 +56,13 @@
   <div class="card shadow-sm rounded-3 mb-4">
     <div class="card-body">
       <form method="get" action="/admin/admin-activity" class="d-flex gap-2 flex-wrap align-items-end">
-        <div class="flex-grow-1" style="min-width: 200px;">
-          <label class="form-label small fw-bold">Search</label>
+        <div class="flex-grow-1" style="min-width: 220px;">
+          <label class="filter-label">Search</label>
           <input type="text" name="q" class="form-control form-control-sm" placeholder="Search action, name, details..." value="{{ q }}" />
         </div>
         
-        <div style="min-width: 140px;">
-          <label class="form-label small fw-bold">Actor Type</label>
+        <div style="min-width: 160px;">
+          <label class="filter-label">Actor Type</label>
           <select name="actor_type" class="form-select form-select-sm">
             <option value="">All Types</option>
             <option value="admin" {% if actor_type == 'admin' %}selected{% endif %}>Admin</option>
@@ -44,8 +70,8 @@
           </select>
         </div>
 
-        <div style="min-width: 120px;">
-          <label class="form-label small fw-bold">Limit</label>
+        <div style="min-width: 140px;">
+          <label class="filter-label">Limit</label>
           <select name="limit" class="form-select form-select-sm">
             <option value="100" {% if limit == 100 %}selected{% endif %}>100</option>
             <option value="200" {% if limit == 200 %}selected{% endif %}>200</option>
@@ -94,7 +120,7 @@
                   {% elif log['actor_type'] == 'system' %}
                     <span class="badge badge-system px-2 py-1" style="font-size: 0.75rem;">System</span>
                   {% else %}
-                    <span class="badge bg-secondary px-2 py-1" style="font-size: 0.75rem;">{{ log['actor_type']|title }}</span>
+                    <span class="badge badge-other px-2 py-1" style="font-size: 0.75rem;">{{ log['actor_type']|title }}</span>
                   {% endif %}
                 </td>
                 <td class="text-muted small">
@@ -105,11 +131,11 @@
                   {% endif %}
                 </td>
                 <td>
-                  <code class="text-muted" style="font-size: 0.8rem;">{{ log['action']|replace('_', ' ')|title }}</code>
+                  <div class="activity-action">{{ log['action']|replace('_', ' ')|title }}</div>
                 </td>
-                <td class="text-muted small">
+                <td class="text-muted small activity-detail">
                   {% if log['detail'] %}
-                    <span style="word-break: break-word;">{{ log['detail'] }}</span>
+                    {{ log['detail']|replace('; ', '<br>')|safe }}
                   {% else %}
                     <em>—</em>
                   {% endif %}
