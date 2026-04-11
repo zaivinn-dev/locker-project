@@ -506,8 +506,9 @@
                 Contact Number
                 <span class="required-badge">*</span>
               </label>
-              <input type="text" id="contact_number" name="contact_number" required
+              <input type="tel" id="contact_number" name="contact_number" inputmode="numeric" pattern="[0-9]{10,15}" required
                      placeholder="09XXXXXXXXX"
+                     autocomplete="tel"
                      value="{{ (form_data.contact_number if form_data else '') | e }}" />
             </div>
 
@@ -527,7 +528,7 @@
                 Category
                 <span class="required-badge">*</span>
               </label>
-              <select id="category" name="category">
+              <select id="category" name="category" required>
                 <option value="" {% if not form_data or not form_data.category %}selected{% endif %}>Select...</option>
                 <option value="student" {% if form_data and form_data.category == 'student' %}selected{% endif %}>Student</option>
                 <option value="adult"   {% if form_data and form_data.category == 'adult'   %}selected{% endif %}>Adult</option>

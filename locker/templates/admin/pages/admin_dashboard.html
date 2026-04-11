@@ -87,16 +87,16 @@
         <div class="card-body p-3">
           <div class="kpi-label">Revenue</div>
           <div class="kpi-number" style="font-size: 1.3rem;">₱{{ "{:,}".format(totals.revenue_total or 0) }}</div>
-          <small class="text-muted">₱400 / member</small>
+          <small class="text-muted">Total recorded payments</small>
         </div>
       </div>
     </div>
     <div class="col-md-6 col-lg-4" style="flex: 0 0 calc(20% - 0.75rem);">
       <div class="card kpi-card">
         <div class="card-body p-3">
-          <div class="kpi-label">Guests</div>
+          <div class="kpi-label">Active Guests</div>
           <div class="kpi-number" style="color: #0dcaf0;">{{ totals.guests_active }}</div>
-          <small class="text-muted">Active access</small>
+          <small class="text-muted">{{ totals.guests_total }} total guests</small>
         </div>
       </div>
     </div>
@@ -104,8 +104,8 @@
       <div class="card kpi-card">
         <div class="card-body p-3">
           <div class="kpi-label">Locker Available</div>
-          <div class="kpi-number" style="color: #28a745;">{{ totals.lockers_total - totals.lockers_assigned }}</div>
-          <small class="text-muted">Ready for use</small>
+          <div class="kpi-number" style="color: #28a745;">{{ totals.lockers_available }}</div>
+          <small class="text-muted">{{ totals.lockers_occupied }} occupied</small>
         </div>
       </div>
     </div>

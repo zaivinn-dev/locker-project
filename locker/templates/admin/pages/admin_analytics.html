@@ -61,7 +61,24 @@
     color: #495057;
     line-height: 1.6;
   }
+  .chart-card {
+    min-height: 320px;
+  }
+  .chart-card .card-body {
+    min-height: 0;
+  }
+  .chart-container {
+    position: relative;
+    width: 100%;
+    height: 240px;
+  }
+  .chart-container canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+  }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
 {% block admin_content %}
@@ -69,16 +86,17 @@
   <div class="mb-4 d-flex justify-content-between align-items-start">
     <div>
       <div class="text-muted" style="letter-spacing:0.14em; text-transform:uppercase; font-size:0.75rem;">Admin</div>
-      <h5 class="mb-0">Reports & Analytics</h5>
+      <h5 class="mb-0">Analytics Dashboard</h5>
+      <p class="text-muted mb-0" style="font-size:0.9rem;">Visualize revenue, access trends, and guest activity in one place.</p>
     </div>
     <div class="d-flex gap-2">
-      <a href="/admin/reports/export-pdf" class="btn btn-outline-primary btn-sm" title="Export as PDF">
+      <a href="/admin/analytics/export-pdf" class="btn btn-outline-primary btn-sm" title="Export as PDF">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline; margin-right:0.25rem; vertical-align:middle;">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="13" x2="12" y2="17"/><polyline points="9 16 12 13 15 16"/>
         </svg>
         PDF
       </a>
-      <a href="/admin/reports/export-csv" class="btn btn-outline-success btn-sm" title="Export as CSV">
+      <a href="/admin/analytics/export-csv" class="btn btn-outline-success btn-sm" title="Export as CSV">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline; margin-right:0.25rem; vertical-align:middle;">
           <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
         </svg>
@@ -154,6 +172,40 @@
     </div>
   </div>
 
+  <!-- Chart Row -->
+  <div class="row g-3 mb-4">
+    <div class="col-lg-6">
+      <div class="card shadow-sm rounded-3 chart-card">
+        <div class="card-body">
+          <h6 class="card-title mb-3">Revenue Trend (Last 30 Days)</h6>
+          <div class="chart-container">
+            <canvas id="revenueTrendChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3">
+      <div class="card shadow-sm rounded-3 chart-card">
+        <div class="card-body">
+          <h6 class="card-title mb-3">Access Types</h6>
+          <div class="chart-container">
+            <canvas id="accessTypeChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-3">
+      <div class="card shadow-sm rounded-3 chart-card">
+        <div class="card-body">
+          <h6 class="card-title mb-3">Guest Category</h6>
+          <div class="chart-container">
+            <canvas id="guestCategoryChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Data Tables Row -->
   <div class="row g-3 mb-4">
     <!-- Top Actions -->
@@ -222,25 +274,102 @@
   </div>
 
   <!-- Summary Card -->
-  <div class="card summary-card shadow-sm rounded-3">
-    <div class="card-body">
-      <div class="d-flex align-items-start gap-3">
-        <div style="flex-shrink: 0;">
-          <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#0d6efd" stroke-width="2">
-            <rect x="3" y="3" width="7" height="7" rx="1"/>
-            <rect x="14" y="3" width="7" height="18" rx="1"/>
-            <rect x="3" y="14" width="7" height="7" rx="1"/>
-          </svg>
-        </div>
-        <div>
-          <h6 class="mb-2">Summary</h6>
+  <div class="row g-3 mb-4">
+    <div class="col-lg-4">
+      <div class="card summary-card shadow-sm rounded-3">
+        <div class="card-body">
+          <h6 class="mb-3">Guest Breakdown</h6>
           <p>
-            <strong>{{ stats.total_members }}</strong> registered members and <strong>{{ stats.total_guests }}</strong> guests.
-            <strong>{{ stats.approved_members }}</strong> members are approved and paid.
-            Monthly revenue is <strong>₱{{ "{:,}".format(stats.monthly_revenue) }}</strong> with <strong>{{ stats.monthly_access_count }}</strong> recorded payments.
+            Active guests: <strong>{{ stats.active_guests }}</strong><br>
+            Expired guests: <strong>{{ stats.expired_guests }}</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="card summary-card shadow-sm rounded-3">
+        <div class="card-body">
+          <h6 class="mb-3">Revenue Insights</h6>
+          <p>
+            Total revenue: <strong>₱{{ "{:,}".format(stats.total_revenue) }}</strong><br>
+            Payments last 30 days: <strong>{{ stats.monthly_access_count }}</strong>
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="card summary-card shadow-sm rounded-3">
+        <div class="card-body">
+          <h6 class="mb-3">Activity Stats</h6>
+          <p>
+            Total access events: <strong>{{ stats.total_access_logs }}</strong><br>
+            Total members: <strong>{{ stats.total_members }}</strong>
           </p>
         </div>
       </div>
     </div>
   </div>
+
+  <script>
+    const revenueLabels = {{ daily_revenue | map(attribute='day') | list | tojson }};
+    const revenueValues = {{ daily_revenue | map(attribute='total') | list | tojson }};
+    const actionLabels = {{ top_actions | map(attribute='action') | list | tojson }};
+    const actionValues = {{ top_actions | map(attribute='c') | list | tojson }};
+    const accessLabels = {{ access_by_type | map(attribute='actor_type') | list | tojson }};
+    const accessValues = {{ access_by_type | map(attribute='c') | list | tojson }};
+    const categoryLabels = {{ guest_category_distribution | map(attribute='category') | list | tojson }};
+    const categoryValues = {{ guest_category_distribution | map(attribute='c') | list | tojson }};
+
+    function buildChart(ctx, type, data, options) {
+      return new Chart(ctx, {
+        type,
+        data,
+        options: options || {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom' },
+          },
+        },
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const revenueCtx = document.getElementById('revenueTrendChart').getContext('2d');
+      buildChart(revenueCtx, 'line', {
+        labels: revenueLabels,
+        datasets: [{
+          label: 'Revenue (₱)',
+          data: revenueValues,
+          borderColor: '#0d6efd',
+          backgroundColor: 'rgba(13, 110, 253, 0.12)',
+          fill: true,
+          pointRadius: 3,
+          tension: 0.3,
+        }],
+      });
+
+      const accessCtx = document.getElementById('accessTypeChart').getContext('2d');
+      buildChart(accessCtx, 'doughnut', {
+        labels: accessLabels,
+        datasets: [{
+          data: accessValues,
+          backgroundColor: ['#0d6efd', '#198754', '#ffc107', '#6c757d', '#0dcaf0'],
+        }],
+      });
+
+      const categoryCtx = document.getElementById('guestCategoryChart').getContext('2d');
+      buildChart(categoryCtx, 'pie', {
+        labels: categoryLabels,
+        datasets: [{
+          data: categoryValues,
+          backgroundColor: ['#6610f2', '#20c997', '#0d6efd'],
+        }],
+      });
+
+      if (!categoryLabels.length) {
+        categoryCtx.canvas.parentElement.innerHTML = '<p class="text-muted mb-0">No guest category data available yet.</p>';
+      }
+    });
+  </script>
 {% endblock %}

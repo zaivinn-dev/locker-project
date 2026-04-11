@@ -3,13 +3,38 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from flask import Flask, redirect, render_template, request, session, url_for
 
+import os
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    def load_dotenv_file(path: str = '.env') -> None:
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#') or '=' not in line:
+                        continue
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+        except FileNotFoundError:
+            pass
+
+    load_dotenv_file()
+
 try:
     from .db import connect, init_db
     from .device import get_device_controller
+    from .device.background_jobs import start_background_jobs, stop_background_jobs, add_card_fee_to_payment
     from .admin import admin_bp
 except ImportError:
     from db import connect, init_db
     from device import get_device_controller
+    from device.background_jobs import start_background_jobs, stop_background_jobs, add_card_fee_to_payment
     from admin import admin_bp
 
 # Global device controller instance - lazy initialized
@@ -34,6 +59,8 @@ fingerprint_enrollment_state = {
 access_status_state = {
     "state": "waiting",
     "locker_id": None,
+    "member_id": None,
+    "member_name": None,
     "message": "Awaiting fingerprint scan",
     "updated_at": None,
 }
@@ -76,12 +103,49 @@ def create_app() -> Flask:
         session.pop("registration_draft", None)
 
     def _find_guest_by_rfid(rfid_uid: str):
-        """Find GUEST by RFID (only returns active/non-expired guests)."""
+        """Find ACTIVE guest card access for the given RFID."""
         with connect() as conn:
-            return conn.execute(
-                "SELECT * FROM members WHERE rfid_uid = ? AND member_type = 'guest' AND expiry_date >= datetime('now')",
+            card = conn.execute(
+                """SELECT grc.*, m.id as guest_id, m.full_name, m.locker_id, m.expiry_date
+                   FROM guest_rfid_cards grc
+                   JOIN members m ON grc.guest_id = m.id
+                   WHERE grc.rfid_uid = ?
+                     AND grc.status = 'ACTIVE'
+                     AND grc.expires_at >= datetime('now', 'localtime')
+                     AND (m.expiry_date IS NULL OR m.expiry_date >= datetime('now', 'localtime'))
+                   ORDER BY grc.issue_time DESC
+                   LIMIT 1""",
                 (rfid_uid,),
             ).fetchone()
+            
+            if card:
+                card_dict = dict(card)
+                card_dict['source'] = 'card'
+                return card_dict
+            
+            # Fallback: check old style member-based guest RFID lookup
+            member = conn.execute(
+                "SELECT * FROM members WHERE rfid_uid = ? AND member_type = 'guest' AND expiry_date >= datetime('now', 'localtime')",
+                (rfid_uid,),
+            ).fetchone()
+            if member:
+                member_dict = dict(member)
+                member_dict['source'] = 'member'
+                return member_dict
+            return None
+
+    def _find_guest_card_by_rfid(rfid_uid: str):
+        """Find any guest RFID card record regardless of current status."""
+        with connect() as conn:
+            card = conn.execute(
+                """SELECT grc.*, m.id as guest_id, m.full_name, m.locker_id, m.expiry_date
+                   FROM guest_rfid_cards grc
+                   JOIN members m ON grc.guest_id = m.id
+                   WHERE grc.rfid_uid = ?
+                   LIMIT 1""",
+                (rfid_uid,),
+            ).fetchone()
+            return dict(card) if card else None
 
     def _find_member_by_fingerprint(fp_uid: str):
         """Find MEMBER by fingerprint for locker access."""
@@ -99,11 +163,42 @@ def create_app() -> Flask:
         if not uid:
             return {"error": "missing uid"}, 400
 
-        # Find guest by RFID
+        # Find guest by RFID (checks card table first)
         guest_row = _find_guest_by_rfid(uid)
         guest = dict(guest_row) if guest_row else None
-        
+
         if not guest:
+            # If the RFID exists but is not currently active, return a more specific denial reason.
+            stale_card = _find_guest_card_by_rfid(uid)
+            if stale_card:
+                from datetime import datetime
+                reason = stale_card.get("status", "inactive")
+                if reason == "ACTIVE":
+                    # Active card record exists, but it did not pass the active filters.
+                    try:
+                        expiry_time = datetime.fromisoformat(stale_card["expires_at"])
+                        if datetime.now() > expiry_time:
+                            reason = "card_expired"
+                        else:
+                            reason = "card_inactive"
+                    except (ValueError, TypeError):
+                        reason = "card_invalid"
+                elif reason == "EXPIRED":
+                    reason = "card_expired"
+                elif reason == "RETURNED":
+                    reason = "card_returned"
+                elif reason in ("BLACKLISTED", "LOST"):
+                    reason = f"card_{reason.lower()}"
+                else:
+                    reason = f"card_{reason.lower()}"
+
+                with connect() as conn:
+                    conn.execute(
+                        "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                        ("guest", str(stale_card.get("guest_id", stale_card.get("id"))), "access_denied", f"card_status={stale_card.get('status')}; rfid={uid}"),
+                    )
+                return {"status": "denied", "reason": reason}, 403
+
             # Check if this RFID belongs to a member (role violation)
             with connect() as conn:
                 member_check = conn.execute(
@@ -127,40 +222,91 @@ def create_app() -> Flask:
                 )
             return {"status": "denied"}, 403
 
-        # Check guest expiry date - deny access if current time is past expiry
-        if guest.get("expiry_date"):
+        guest_source = guest.get('source', 'card')
+
+        if guest_source == 'card':
             from datetime import datetime
-            try:
-                expiry_time = datetime.fromisoformat(guest["expiry_date"])
-                if datetime.now() > expiry_time:  # Simple check: if now is past expiry, deny
-                    with connect() as conn:
-                        conn.execute(
-                            "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                            ("guest", str(guest["id"]), "access_denied", f"guest_access_expired; rfid={uid}; expiry={guest['expiry_date']}"),
-                        )
-                    return {"status": "denied", "reason": "access_expired"}, 403
-            except (ValueError, TypeError):
-                # Invalid expiry_date format - deny access to be safe
+
+            if guest.get("status") not in ("ACTIVE", None, ""):
+                reason = guest["status"].lower()
                 with connect() as conn:
                     conn.execute(
                         "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                        ("guest", str(guest["id"]), "access_denied", f"invalid_expiry_date; rfid={uid}"),
+                        ("guest", str(guest.get("guest_id", guest.get("id"))), "access_denied", f"card_status={guest['status']}; rfid={uid}"),
                     )
-                return {"status": "denied", "reason": "invalid_expiry_date"}, 403
+                return {"status": "denied", "reason": f"card_{reason}"}, 403
+
+            if guest.get("expires_at"):
+                try:
+                    expiry_time = datetime.fromisoformat(guest["expires_at"])
+                    if datetime.now() > expiry_time:
+                        with connect() as conn:
+                            conn.execute(
+                                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                                ("guest", str(guest.get("guest_id", guest.get("id"))), "access_denied", f"card_expired; rfid={uid}; expiry={guest['expires_at']}"),
+                            )
+                        return {"status": "denied", "reason": "card_expired"}, 403
+                except (ValueError, TypeError):
+                    pass
+
+            if guest.get("expiry_date"):
+                try:
+                    member_expiry = datetime.fromisoformat(guest["expiry_date"])
+                    if datetime.now() > member_expiry:
+                        with connect() as conn:
+                            conn.execute(
+                                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                                ("guest", str(guest.get("guest_id", guest.get("id"))), "access_denied", f"guest_access_expired; rfid={uid}; expiry={guest['expiry_date']}"),
+                            )
+                        return {"status": "denied", "reason": "guest_access_expired"}, 403
+                except (ValueError, TypeError):
+                    pass
+        else:
+            from datetime import datetime
+            if guest.get("expiry_date"):
+                try:
+                    member_expiry = datetime.fromisoformat(guest["expiry_date"])
+                    if datetime.now() > member_expiry:
+                        with connect() as conn:
+                            conn.execute(
+                                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                                ("guest", str(guest.get("id")), "access_denied", f"guest_access_expired; rfid={uid}; expiry={guest['expiry_date']}"),
+                            )
+                        return {"status": "denied", "reason": "guest_access_expired"}, 403
+                except (ValueError, TypeError):
+                    pass
 
         # Check if guest has locker assigned
-        locker_id = guest["locker_id"]
+        locker_id = guest.get("locker_id")
         if not locker_id:
             return {"status": "failed", "reason": "no locker assigned"}, 409
 
-        # Unlock the locker
-        get_device().unlock(int(locker_id))
+        # Toggle locker state based on current device state.
+        try:
+            locker_state = get_device().get_locker(int(locker_id))
+        except Exception as exc:
+            return {"status": "error", "reason": "device_unavailable", "message": str(exc)}, 500
+
+        if locker_state.locked:
+            new_state = "unlocked"
+            try:
+                get_device().unlock(int(locker_id))
+            except Exception as exc:
+                return {"status": "error", "reason": "unlock_failed", "message": str(exc)}, 500
+        else:
+            new_state = "locked"
+            try:
+                get_device().lock(int(locker_id))
+            except Exception as exc:
+                return {"status": "error", "reason": "lock_failed", "message": str(exc)}, 500
+
         with connect() as conn:
             conn.execute(
                 "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                ("guest", str(guest["id"]), "rfid_access_granted", f"locker_id={locker_id}; rfid={uid}"),
+                ("guest", str(guest.get("guest_id", guest.get("id"))), f"rfid_access_{new_state}", f"locker_id={locker_id}; rfid={uid}"),
             )
-        return {"status": "unlocked", "locker_id": locker_id}
+
+        return {"status": new_state, "locker_id": locker_id}
 
     @app.post("/device/fingerprint")
     def device_fingerprint():
@@ -210,6 +356,8 @@ def create_app() -> Flask:
             # Store access status for polling in shared server state
             access_status_state["state"] = "denied"
             access_status_state["locker_id"] = None
+            access_status_state["member_id"] = None
+            access_status_state["member_name"] = None
             access_status_state["message"] = "Fingerprint not registered for member access"
             access_status_state["updated_at"] = datetime.now(timezone.utc)
             return {"status": "denied"}, 403
@@ -228,7 +376,9 @@ def create_app() -> Flask:
         # Store access status for polling in shared server state
         access_status_state["state"] = "unlocked"
         access_status_state["locker_id"] = locker_id
-        access_status_state["message"] = "Unlock command sent - opening locker"
+        access_status_state["member_id"] = member["id"]
+        access_status_state["member_name"] = member["full_name"]
+        access_status_state["message"] = f"Welcome {member['full_name']}. Locker {locker_id} unlocked."
         access_status_state["updated_at"] = datetime.now(timezone.utc)
         return {"status": "unlocked", "locker_id": locker_id}
 
@@ -353,15 +503,19 @@ def create_app() -> Flask:
                 return {
                     "state": access_status_state.get("state", "waiting"),
                     "locker_id": access_status_state.get("locker_id"),
+                    "member_id": access_status_state.get("member_id"),
+                    "member_name": access_status_state.get("member_name"),
                     "message": access_status_state.get("message", "Awaiting fingerprint scan"),
                 }
 
         # Clear stale status after 30 seconds.
         access_status_state["state"] = "waiting"
         access_status_state["locker_id"] = None
+        access_status_state["member_id"] = None
+        access_status_state["member_name"] = None
         access_status_state["message"] = "Awaiting fingerprint scan"
         access_status_state["updated_at"] = None
-        return {"state": "waiting", "locker_id": None, "message": "Awaiting fingerprint scan"}
+        return {"state": "waiting", "locker_id": None, "member_id": None, "member_name": None, "message": "Awaiting fingerprint scan"}
 
     @app.post("/api/access/enable-scan")
     def api_enable_scan():
@@ -382,9 +536,66 @@ def create_app() -> Flask:
         """Clear locker access state when user returns to home page."""
         access_status_state["state"] = "waiting"
         access_status_state["locker_id"] = None
+        access_status_state["member_id"] = None
+        access_status_state["member_name"] = None
         access_status_state["message"] = "Awaiting fingerprint scan"
         access_status_state["updated_at"] = None
         return {"status": "locker_state_cleared"}
+
+    @app.post("/api/access/locker-action")
+    def api_access_locker_action():
+        """Lock or unlock the current member's assigned locker.
+        Can use either session state OR locker_id from request body."""
+        data = request.get_json(silent=True) or {}
+        action = (data.get("action") or "").strip().lower()
+        locker_id = data.get("locker_id")  # Can be provided in request
+        
+        if action not in ("lock", "unlock"):
+            return {"error": "invalid_action"}, 400
+
+        # Try to get locker_id from request first (for post-access page)
+        # Fall back to session state (for inline access page)
+        if not locker_id:
+            locker_id = access_status_state.get("locker_id")
+        
+        if not locker_id:
+            return {"error": "no_locker_id"}, 400
+
+        member_id = access_status_state.get("member_id", "unknown")
+        member_name = access_status_state.get("member_name", "Member")
+        
+        print(f"[LOCKER ACTION] Requested {action} for locker {locker_id} by member {member_id}")
+        try:
+            if action == "lock":
+                get_device().lock(int(locker_id))
+                new_state = "locked"
+                message = f"Locker {locker_id} locked. Scan next member or unlock again."
+                log_action = "member_locker_locked"
+            else:
+                get_device().unlock(int(locker_id))
+                new_state = "unlocked"
+                message = f"Locker {locker_id} unlocked. Scan next member or lock again."
+                log_action = "member_locker_unlocked"
+        except Exception as e:
+            print(f"[LOCKER ACTION] ✗ Failed to {action} locker {locker_id}: {type(e).__name__}: {e}")
+            with connect() as conn:
+                conn.execute(
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("member", str(member_id), f"member_locker_{action}_failed", f"locker_id={locker_id}; member={member_name}; error={str(e)}"),
+                )
+            return {"status": "error", "action": action, "error": f"Failed to {action} locker: {type(e).__name__}"}, 500
+
+        with connect() as conn:
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                ("member", str(member_id), log_action, f"locker_id={locker_id}; member={member_name}"),
+            )
+
+        access_status_state["state"] = new_state
+        access_status_state["message"] = message
+        access_status_state["updated_at"] = datetime.now(timezone.utc)
+        print(f"[LOCKER ACTION] ✓ Successfully {action}ed locker {locker_id}")
+        return {"status": "ok", "action": action, "locker_id": locker_id, "state": new_state}
 
     @app.get("/api/access/scan-enabled")
     def api_scan_enabled():
@@ -451,23 +662,39 @@ def create_app() -> Flask:
         address = (request.form.get("address") or "").strip()
         contact_number = (request.form.get("contact_number") or "").strip()
         age_raw = (request.form.get("age") or "").strip()
-        category = (request.form.get("category") or "").strip()
+        category = (request.form.get("category") or "").strip().lower()
         error = None
+
         if not full_name:
             error = "Full name is required."
         elif not address:
             error = "Address is required."
         elif not contact_number:
             error = "Contact number is required."
+        elif not age_raw:
+            error = "Age is required."
+        elif not category:
+            error = "Category is required."
 
         age_val = None
-        if age_raw:
+        if not error:
             try:
                 age_val = int(age_raw)
                 if age_val <= 0:
                     raise ValueError
             except ValueError:
                 error = "Age must be a positive number."
+
+        if not error:
+            normalized_contact = ''.join(ch for ch in contact_number if ch.isdigit())
+            if len(normalized_contact) < 10:
+                error = "Contact number must contain at least 10 digits."
+            elif normalized_contact != contact_number:
+                error = "Contact number may only contain digits."
+
+        valid_categories = {"student", "adult", "senior"}
+        if not error and category not in valid_categories:
+            error = "Please select a valid category."
 
         if error:
             return render_template(
@@ -515,7 +742,7 @@ def create_app() -> Flask:
                      SELECT 1 FROM members 
                      WHERE locker_id = lockers.id 
                      AND member_type = 'guest' 
-                     AND expiry_date > datetime('now')
+                     AND expiry_date > datetime('now', 'localtime')
                    ) THEN 'guest_assigned' 
                    ELSE NULL END as assignment_status
                    FROM lockers ORDER BY id LIMIT 4"""
@@ -546,7 +773,7 @@ def create_app() -> Flask:
                      WHERE locker_id = ? 
                      AND (
                        (member_type = 'regular' AND status = 'approved')
-                       OR (member_type = 'guest' AND expiry_date > datetime('now'))
+                       OR (member_type = 'guest' AND expiry_date > datetime('now', 'localtime'))
                      )
                    )""",
                 (locker_id, locker_id),
@@ -703,7 +930,494 @@ def create_app() -> Flask:
         scan_control_state["last_enabled"] = datetime.now(timezone.utc)
         return render_template("pages/user_access.html")
 
+    @app.get("/user/locker-access")
+    def user_locker_access():
+        """Display the improved locker access confirmation page."""
+        return render_template("pages/member_locker.html")
+
+    # ========== ADMIN ENDPOINTS - Card Management & Emergency Controls ==========
+    
+    @app.post("/api/admin/card-issue")
+    def admin_card_issue():
+        """Admin endpoint to issue a new RFID card to a guest."""
+        data = request.get_json(silent=True) or {}
+        guest_id = data.get("guest_id")
+        rfid_uid = (data.get("rfid_uid") or "").strip()
+        hours_valid = data.get("hours_valid", 24)  # Card valid for N hours
+        admin_id = data.get("admin_id") or session.get("admin_id")
+        checkout_notes = (data.get("notes") or "").strip()
+        
+        try:
+            guest_id = int(guest_id)
+        except (TypeError, ValueError):
+            guest_id = None
+        
+        if not guest_id or not rfid_uid:
+            return {"error": "missing or invalid guest_id or rfid_uid"}, 400
+        
+        from datetime import datetime, timedelta
+        
+        with connect() as conn:
+            # Verify guest exists
+            guest = conn.execute(
+                "SELECT id, full_name FROM members WHERE id = ? AND member_type = 'guest'",
+                (guest_id,),
+            ).fetchone()
+            
+            if not guest:
+                return {"error": "guest_not_found"}, 404
+            
+            # Check if card already exists in system
+            existing = conn.execute(
+                "SELECT id, status FROM guest_rfid_cards WHERE rfid_uid = ? ORDER BY issue_time DESC LIMIT 1",
+                (rfid_uid,),
+            ).fetchone()
+            
+            if existing:
+                existing_status = existing["status"] or "UNKNOWN"
+                if existing_status == "ACTIVE":
+                    return {"error": "card_already_registered", "rfid_uid": rfid_uid}, 409
+                if existing_status in ("BLACKLISTED", "LOST"):
+                    return {"error": "card_blacklisted", "rfid_uid": rfid_uid, "status": existing_status}, 409
+                if existing_status not in ("EXPIRED", "RETURNED"):
+                    return {"error": "card_invalid_status", "rfid_uid": rfid_uid, "status": existing_status}, 409
+            
+            # Reuse a returned or expired card record if the same RFID is being reissued.
+            now = datetime.now()
+            expires_at = now + timedelta(hours=hours_valid)
+            expected_return = now + timedelta(hours=hours_valid + 1)  # 1 hour grace period
+            
+            if existing and existing["status"] in ("EXPIRED", "RETURNED"):
+                conn.execute(
+                    """INSERT INTO guest_rfid_cards
+                       (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes)
+                       VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, ?)""",
+                    (guest_id, rfid_uid, now.isoformat(), expires_at.isoformat(), expected_return.isoformat(), admin_id, checkout_notes or "Card issued by admin"),
+                )
+                conn.execute(
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("admin", str(admin_id or "unknown"), "card_reissued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; valid_hours={hours_valid}"),
+                )
+                return {
+                    "status": "ok",
+                    "message": f"Card reissued to {guest['full_name']}",
+                    "rfid_uid": rfid_uid,
+                    "expires_at": expires_at.isoformat(),
+                    "expected_return_time": expected_return.isoformat()
+                }
+            
+            # Create card record
+            conn.execute(
+                """INSERT INTO guest_rfid_cards 
+                   (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (guest_id, rfid_uid, "ACTIVE", now.isoformat(), expires_at.isoformat(), 
+                 expected_return.isoformat(), admin_id, checkout_notes or "Card issued by admin"),
+            )
+            
+            # Log the card issuance
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                ("admin", str(admin_id or "unknown"), "card_issued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; valid_hours={hours_valid}"),
+            )
+        
+        return {
+            "status": "ok", 
+            "message": f"Card issued to {guest['full_name']}", 
+            "rfid_uid": rfid_uid,
+            "expires_at": expires_at.isoformat(),
+            "expected_return_time": expected_return.isoformat()
+        }
+    
+    @app.post("/api/admin/assign-locker")
+    def admin_assign_locker():
+        """Admin endpoint to assign a locker to a guest."""
+        data = request.get_json(silent=True) or {}
+        guest_id = data.get("guest_id")
+        locker_id = data.get("locker_id")
+        notes = (data.get("notes") or "").strip()
+        admin_id = data.get("admin_id") or session.get("admin_id")
+        
+        try:
+            guest_id = int(guest_id)
+            locker_id = int(locker_id)
+        except (TypeError, ValueError):
+            return {"error": "invalid guest_id or locker_id"}, 400
+        
+        with connect() as conn:
+            # Verify guest exists and is active
+            guest = conn.execute(
+                "SELECT id, full_name, locker_id FROM members WHERE id = ? AND member_type = 'guest'",
+                (guest_id,),
+            ).fetchone()
+            
+            if not guest:
+                return {"error": "guest_not_found"}, 404
+            
+            # Check if guest already has a locker assigned
+            if guest["locker_id"]:
+                return {"error": "guest_already_has_locker", "current_locker": guest["locker_id"]}, 409
+            
+            # Check if locker is available (not assigned to anyone)
+            existing_assignment = conn.execute(
+                "SELECT id, full_name FROM members WHERE locker_id = ?",
+                (locker_id,),
+            ).fetchone()
+            
+            if existing_assignment:
+                return {"error": "locker_already_assigned", "assigned_to": existing_assignment["full_name"]}, 409
+            
+            # Assign the locker to the guest
+            conn.execute(
+                "UPDATE members SET locker_id = ? WHERE id = ?",
+                (locker_id, guest_id),
+            )
+            
+            # Update locker status to occupied
+            conn.execute(
+                "UPDATE lockers SET status = 'occupied' WHERE id = ?",
+                (locker_id,),
+            )
+            
+            # Log the assignment
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                ("admin", str(admin_id or "unknown"), "locker_assigned", f"guest_id={guest_id}; locker_id={locker_id}; notes={notes}"),
+            )
+            
+            conn.commit()
+        
+        return {
+            "status": "ok",
+            "message": f"Locker {locker_id} assigned to {guest['full_name']}",
+            "guest_id": guest_id,
+            "locker_id": locker_id
+        }
+    
+    @app.post("/api/admin/card-mark-lost")
+    def admin_card_mark_lost():
+        """Admin marks a guest RFID card as lost and blacklists it."""
+        data = request.get_json(silent=True) or {}
+        rfid_uid = (data.get("rfid_uid") or "").strip()
+        notes = (data.get("notes") or "").strip()
+        charge_fee = data.get("charge_fee", False)  # Optional: charge replacement fee
+        
+        if not rfid_uid:
+            return {"error": "missing rfid_uid"}, 400
+        
+        with connect() as conn:
+            # Get card info to find guest ID
+            card = conn.execute(
+                "SELECT id, guest_id, status FROM guest_rfid_cards WHERE rfid_uid = ?",
+                (rfid_uid,),
+            ).fetchone()
+            legacy_guest = None
+            if not card:
+                # Fallback for legacy guest entries stored only in members
+                legacy_guest = conn.execute(
+                    "SELECT id AS guest_id, expiry_date FROM members WHERE member_type = 'guest' AND rfid_uid = ?",
+                    (rfid_uid,),
+                ).fetchone()
+                if not legacy_guest:
+                    return {"error": "card_not_found"}, 404
+
+            guest_id = (card or legacy_guest)["guest_id"]
+            
+            # Update card status to LOST and BLACKLIST it
+            if card:
+                conn.execute(
+                    """UPDATE guest_rfid_cards 
+                       SET status = 'BLACKLISTED', return_notes = ?
+                       WHERE rfid_uid = ?""",
+                    (f"LOST - {notes}" if notes else "LOST - Card marked by admin", rfid_uid),
+                )
+            else:
+                from datetime import datetime
+                expires_at = legacy_guest["expiry_date"]
+                issue_time = datetime.now().isoformat()
+                conn.execute(
+                    "INSERT INTO guest_rfid_cards (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, return_notes) VALUES (?, ?, 'BLACKLISTED', ?, ?, ?, ?)",
+                    (
+                        guest_id,
+                        rfid_uid,
+                        issue_time,
+                        expires_at,
+                        expires_at,
+                        f"LOST - {notes}" if notes else "LOST - Card marked by admin",
+                    ),
+                )
+            
+            # Log the action
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                ("admin", "system", "card_blacklisted", f"rfid_uid={rfid_uid}; reason=lost"),
+            )
+            
+            # Optional: charge replacement fee
+            if charge_fee:
+                add_card_fee_to_payment(guest_id, f"Lost RFID card replacement - {rfid_uid}")
+        
+        return {"status": "ok", "message": f"Card {rfid_uid} blacklisted", "fee_charged": charge_fee}
+    
+    @app.post("/api/admin/card-mark-returned")
+    def admin_card_mark_returned():
+        """Admin marks a guest RFID card as returned."""
+        if not request.is_json:
+            return {"error": "invalid_request", "message": "Request body must be JSON."}, 400
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return {"error": "invalid_request", "message": "Request body must be a JSON object."}, 400
+
+        rfid_uid = (data.get("rfid_uid") or "").strip()
+        admin_id = data.get("admin_id") or session.get("admin_id")
+        notes = (data.get("notes") or "").strip()
+
+        if not rfid_uid:
+            return {"error": "missing_rfid_uid", "message": "The rfid_uid field is required."}, 400
+
+        from datetime import datetime
+        with connect() as conn:
+            card = conn.execute(
+                "SELECT id, guest_id, status, expires_at FROM guest_rfid_cards WHERE rfid_uid = ?",
+                (rfid_uid,),
+            ).fetchone()
+            legacy_guest = None
+            if not card:
+                legacy_guest = conn.execute(
+                    "SELECT id AS guest_id, expiry_date FROM members WHERE member_type = 'guest' AND rfid_uid = ?",
+                    (rfid_uid,),
+                ).fetchone()
+                if not legacy_guest:
+                    return {
+                        "error": "card_not_found",
+                        "message": f"RFID card {rfid_uid} was not found or is not registered in the system.",
+                    }, 404
+
+            if card:
+                cursor = conn.execute(
+                    """UPDATE guest_rfid_cards 
+                       SET status = 'RETURNED', return_admin_id = ?, actual_return_time = ?, return_notes = ?
+                       WHERE rfid_uid = ?""",
+                    (admin_id, datetime.now().isoformat(), notes or "Returned to admin", rfid_uid),
+                )
+            else:
+                from datetime import datetime
+                expires_at = legacy_guest["expiry_date"]
+                issue_time = datetime.now().isoformat()
+                cursor = conn.execute(
+                    "INSERT INTO guest_rfid_cards (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, actual_return_time, return_admin_id, return_notes) VALUES (?, ?, 'RETURNED', ?, ?, ?, ?, ?, ?)",
+                    (
+                        legacy_guest["guest_id"],
+                        rfid_uid,
+                        issue_time,
+                        expires_at,
+                        expires_at,
+                        datetime.now().isoformat(),
+                        admin_id,
+                        notes or "Returned to admin",
+                    ),
+                )
+
+            if cursor.rowcount == 0:
+                return {
+                    "error": "card_not_found",
+                    "message": f"RFID card {rfid_uid} was not found or is not registered in the system.",
+                }, 404
+
+            # Release the locker assignment for this guest, if any.
+            guest_id = card["guest_id"] if card else legacy_guest["guest_id"]
+            locker = conn.execute(
+                "SELECT locker_id FROM members WHERE id = ?",
+                (guest_id,),
+            ).fetchone()
+            log_detail = f"rfid_uid={rfid_uid}; guest_id={guest_id}"
+            if locker and locker["locker_id"]:
+                locker_id = locker["locker_id"]
+                conn.execute(
+                    "UPDATE members SET locker_id = NULL WHERE id = ?",
+                    (guest_id,),
+                )
+                conn.execute(
+                    "UPDATE lockers SET status = 'available' WHERE id = ?",
+                    (locker_id,),
+                )
+                log_detail = f"rfid_uid={rfid_uid}; guest_id={guest_id}; locker_id={locker_id}"
+            else:
+                log_detail = f"rfid_uid={rfid_uid}; guest_id={guest_id}"
+
+            # Clear the old guest RFID mapping so this card can be reassigned.
+            conn.execute(
+                "UPDATE members SET rfid_uid = NULL WHERE id = ?",
+                (guest_id,),
+            )
+
+            # Log the action
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                ("admin", str(admin_id or "unknown"), "card_returned", log_detail),
+            )
+
+        return {"status": "ok", "message": f"Card {rfid_uid} marked as returned."}
+
+    @app.get("/api/admin/guest-list")
+    def admin_guest_list():
+        """Return current active guest records for card issuance."""
+        q = (request.args.get("q") or "").strip()
+        now = datetime.now().isoformat()
+        with connect() as conn:
+            if q:
+                guests = conn.execute(
+                    """
+                    SELECT id, full_name, locker_id, rfid_uid, expiry_date
+                    FROM members
+                    WHERE member_type = 'guest'
+                      AND (expiry_date IS NULL OR REPLACE(expiry_date, 'T', ' ') >= ?)
+                      AND (full_name LIKE ? OR CAST(id AS TEXT) LIKE ? OR rfid_uid LIKE ?)
+                    ORDER BY full_name ASC
+                    LIMIT 200
+                    """,
+                    (now, f"%{q}%", f"%{q}%", f"%{q}%"),
+                ).fetchall()
+            else:
+                guests = conn.execute(
+                    """
+                    SELECT id, full_name, locker_id, rfid_uid, expiry_date
+                    FROM members
+                    WHERE member_type = 'guest' AND (expiry_date IS NULL OR REPLACE(expiry_date, 'T', ' ') >= ?)
+                    ORDER BY full_name ASC
+                    LIMIT 200
+                    """,
+                    (now,),
+                ).fetchall()
+
+        return {"guests": [dict(g) for g in guests]}
+
+    def _load_card_audit_records(conn):
+        from datetime import datetime
+
+        now = datetime.now().isoformat()
+
+        card_rows = conn.execute(
+            """SELECT grc.*, m.full_name as guest_name, m.contact_number, m.locker_id
+                   FROM guest_rfid_cards grc
+                   LEFT JOIN members m ON grc.guest_id = m.id
+                   ORDER BY grc.issue_time DESC""",
+        ).fetchall()
+
+        cards = [dict(card) for card in card_rows]
+        existing_rfids = {card["rfid_uid"] for card in cards if card.get("rfid_uid")}
+
+        legacy_rows = conn.execute(
+            """SELECT id as guest_id, full_name as guest_name, contact_number, locker_id,
+                      rfid_uid, expiry_date
+                   FROM members
+                   WHERE member_type = 'guest'
+                     AND rfid_uid IS NOT NULL
+                     AND rfid_uid NOT IN (SELECT rfid_uid FROM guest_rfid_cards)""",
+        ).fetchall()
+
+        for row in legacy_rows:
+            card = dict(row)
+            expiry_at = card.get("expiry_date")
+            card["status"] = "ACTIVE" if not expiry_at or expiry_at >= now else "EXPIRED"
+            card["issue_time"] = card.get("expiry_date") or None
+            card["expires_at"] = expiry_at
+            card["expected_return_time"] = expiry_at
+            card["actual_return_time"] = None
+            card["checkout_notes"] = "Legacy guest RFID card"
+            card["return_notes"] = None
+            card["guest_id"] = card.get("guest_id")
+            cards.append(card)
+
+        for card in cards:
+            status = card.get("status")
+            expires_at = card.get("expires_at")
+            expected_return_time = card.get("expected_return_time")
+            if status == "ACTIVE" and expires_at and expires_at < now:
+                card["action_needed"] = "EXPIRED"
+            elif status == "ACTIVE" and expected_return_time and expected_return_time < now:
+                card["action_needed"] = "OVERDUE"
+            elif status == "LOST":
+                card["action_needed"] = "MISSING"
+            else:
+                card["action_needed"] = status
+
+        return cards
+
+    @app.post("/api/admin/force-lock-locker")
+    def admin_force_lock_locker():
+        """Admin endpoint to force-lock a locker (emergency recovery)."""
+        data = request.get_json(silent=True) or {}
+        locker_id = data.get("locker_id")
+        reason = (data.get("reason") or "").strip()
+        
+        if not locker_id:
+            return {"error": "missing locker_id"}, 400
+        
+        try:
+            # Send force-lock command to ESP32
+            get_device().lock(int(locker_id))
+            
+            with connect() as conn:
+                conn.execute(
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("admin", "system", "force_locked_locker", f"locker_id={locker_id}; reason={reason or 'card_lost'}"),
+                )
+            
+            return {"status": "ok", "message": f"Locker {locker_id} force-locked"}
+        except Exception as e:
+            msg = f"Failed to force-lock locker: {str(e)}"
+            print(f"[ADMIN] {msg}")
+            return {"status": "error", "error": msg}, 500
+
+    @app.get("/api/admin/card-audit-report")
+    def admin_card_audit_report():
+        """Generate daily card audit report showing missing/overdue cards."""
+        from datetime import datetime
+        
+        with connect() as conn:
+            cards_list = _load_card_audit_records(conn)
+            
+            summary = {
+                "active": sum(1 for c in cards_list if c.get("status") == "ACTIVE"),
+                "returned": sum(1 for c in cards_list if c.get("status") == "RETURNED"),
+                "lost": sum(1 for c in cards_list if c.get("status") == "LOST"),
+                "blacklisted": sum(1 for c in cards_list if c.get("status") == "BLACKLISTED"),
+                "expired": sum(1 for c in cards_list if c.get("action_needed") == "EXPIRED"),
+                "overdue": sum(1 for c in cards_list if c.get("action_needed") == "OVERDUE"),
+                "returned_today": sum(
+                    1 for c in cards_list
+                    if c.get("actual_return_time")
+                    and datetime.fromisoformat(c["actual_return_time"]).date() == datetime.now().date()
+                ),
+            }
+            
+            report = {
+                "generated_at": datetime.now().isoformat(),
+                "total_cards": len(cards_list),
+                "cards": cards_list,
+                "summary": summary,
+            }
+        
+        return report
+
+    @app.get("/api/admin/card-audit-history")
+    def admin_card_audit_history():
+        """Generate a full guest card audit history list."""
+        with connect() as conn:
+            cards_list = _load_card_audit_records(conn)
+            
+            history = {
+                "generated_at": datetime.now().isoformat(),
+                "total_records": len(cards_list),
+                "cards": cards_list,
+            }
+        return history
+
     print("About to return app")
+    # Start background jobs for card cleanup, email notifications, and payment processing
+    start_background_jobs()
     return app
 
 

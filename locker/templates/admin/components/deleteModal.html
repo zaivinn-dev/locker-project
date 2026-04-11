@@ -53,7 +53,8 @@
    * @param {function} callback - Callback function to execute on confirm
    */
   function showDeleteModal(type, data, callback) {
-    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
+    const modalEl = document.getElementById('deleteModal');
+    const modal = new bootstrap.Modal(modalEl);
     
     // Set message based on type
     let message = '';
@@ -101,6 +102,7 @@
       }
     };
 
+    modalEl.removeAttribute('aria-hidden');
     modal.show();
   }
 </script>

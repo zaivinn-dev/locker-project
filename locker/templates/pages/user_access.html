@@ -50,11 +50,11 @@
 
         <div style="background:#e0f5e1; border: 1px solid #0f6e56; border-radius:12px; padding:1.5rem; margin:1.5rem 0; text-align:center;">
           <div style="font-size:16px; font-weight:700; color:#0f6e56; margin-bottom:8px;">
-            Opening Locker #<span id="locker-number">--</span>
+            <span id="member-name">Member</span> · Locker #<span id="locker-number">--</span>
           </div>
-          <div style="font-size:12px; color:#7a8fa6;">Your locker is being unlocked...</div>
-          <div id="auto-return-notice" style="font-size:11px; color:#0f6e56; margin-top:8px; font-weight:600;">
-            Returning to home page in <span id="countdown">10</span> seconds...
+          <div style="font-size:12px; color:#7a8fa6;">Your locker is unlocked and ready.</div>
+          <div id="session-note" style="font-size:11px; color:#0f6e56; margin-top:8px; font-weight:600;">
+            Locker is unlocked. Lock it when finished or scan next member.
           </div>
         </div>
 
@@ -62,12 +62,19 @@
         <div style="background:#f4f6f9; border-radius:12px; padding:14px 16px; margin-bottom:1.5rem; border-left:3px solid #0f6e56;">
           <div style="font-size:11px; font-weight:700; color:#7a8fa6; text-transform:uppercase; margin-bottom:8px;">Next steps</div>
           <ol style="margin:0; padding:0 0 0 18px; font-size:13px; color:#1a2d3e; line-height:1.8;">
-            <li>Wait for your locker to unlock</li>
             <li>Open your assigned locker</li>
             <li>Retrieve your items</li>
             <li>Close and lock the locker</li>
-            <li>The system will automatically return to the home page</li>
+            <li>Scan the next member to continue</li>
           </ol>
+        </div>
+
+        <!-- Locker action button -->
+        <div style="display:flex; gap:12px; margin-bottom:1rem; flex-wrap:wrap; justify-content:center;">
+          <button type="button" id="lock-btn"
+                  style="flex:1 1 140px; padding:12px 16px; border-radius:12px; border:1.5px solid #0f6e56; background:#0f6e56; color:#fff; font-family:inherit; font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; cursor:pointer; transition:all 0.15s ease;">
+            Lock Locker
+          </button>
         </div>
 
         <!-- Back button -->
@@ -75,7 +82,7 @@
                 style="width:100%; padding:12px 16px; border-radius:12px; border:1.5px solid #e2e8f0; background:#fff; font-family:inherit; font-size:13px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#7a8fa6; cursor:pointer; transition:all 0.15s ease;"
                 onmouseover="this.style.background='#f4f6f9';this.style.borderColor='#ccd5de'"
                 onmouseout="this.style.background='#fff';this.style.borderColor='#e2e8f0'">
-          ← Back to Home
+          Done / Next Member
         </button>
       </div>
 
@@ -108,9 +115,10 @@ document.addEventListener('DOMContentLoaded', function() {
   const successState = document.getElementById('success-state');
   const errorState = document.getElementById('error-state');
   const lockerNumber = document.getElementById('locker-number');
+  const memberNameElement = document.getElementById('member-name');
+  const sessionNote = document.getElementById('session-note');
   const scannerStatus = document.getElementById('scanner-status');
-  const countdownElement = document.getElementById('countdown');
-  const autoReturnNotice = document.getElementById('auto-return-notice');
+  const lockBtn = document.getElementById('lock-btn');
   const backHomeBtn = document.getElementById('back-home-btn');
   const tryAgainBtn = document.getElementById('try-again-btn');
   
@@ -118,7 +126,6 @@ document.addEventListener('DOMContentLoaded', function() {
   let heartbeatInterval = null;
   let pollCount = 0;
   let scanStatusText = document.getElementById('scan-status-text');
-  let autoReturnTimeout = null;
 
   function resetToScanningState() {
     scanningState.style.display = 'block';
@@ -128,31 +135,7 @@ document.addEventListener('DOMContentLoaded', function() {
     scanStatusText.textContent = 'Waiting for scanner to activate...';
   }
 
-  // Auto-return to scanning state after successful unlock
-  function startAutoReturn() {
-    // Clear any existing countdown timers first
-    if (autoReturnTimeout) {
-      clearInterval(autoReturnTimeout);
-      autoReturnTimeout = null;
-    }
-    
-    let countdown = 10;
-    countdownElement.textContent = countdown;
-    autoReturnNotice.style.display = 'block';
-
-    autoReturnTimeout = setInterval(() => {
-      countdown--;
-      countdownElement.textContent = countdown;
-
-      if (countdown <= 0) {
-        clearInterval(autoReturnTimeout);
-        autoReturnTimeout = null;
-        goHome();  // Return to home page for next member
-      }
-    }, 1000);
-  }
-
-  // Return to home page for next member
+  // Return to scanning state for the next member
   async function returnToScanning() {
     // Clear any existing intervals
     if (pollInterval) {
@@ -163,9 +146,15 @@ document.addEventListener('DOMContentLoaded', function() {
       clearInterval(heartbeatInterval);
       heartbeatInterval = null;
     }
-    if (autoReturnTimeout) {
-      clearInterval(autoReturnTimeout);
-      autoReturnTimeout = null;
+
+    // Clear the active member session state on the backend
+    try {
+      await fetch('/api/access/clear-locker-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (error) {
+      console.log('Error clearing locker state:', error);
     }
 
     // Return to scanning mode on the same page for the next member
@@ -173,6 +162,9 @@ document.addEventListener('DOMContentLoaded', function() {
     errorState.style.display = 'none';
     scanningState.style.display = 'block';
     scanStatusText.textContent = 'Returning to scanning mode...';
+    if (sessionNote) {
+      sessionNote.textContent = 'Awaiting next member scan...';
+    }
 
     await enableScanning();
 
@@ -190,10 +182,6 @@ document.addEventListener('DOMContentLoaded', function() {
       clearInterval(heartbeatInterval);
       heartbeatInterval = null;
     }
-    if (autoReturnTimeout) {
-      clearInterval(autoReturnTimeout);
-      autoReturnTimeout = null;
-    }
     disableScanning();
     
     // Clear locker state so next member can scan
@@ -205,8 +193,14 @@ document.addEventListener('DOMContentLoaded', function() {
     window.location.href = '/';
   }
 
-  // Add event listener for back home button
-  backHomeBtn.addEventListener('click', goHome);
+  // Add event listener for done/next member button
+  backHomeBtn.addEventListener('click', returnToScanning);
+
+  // Add event listener for the lock button
+  lockBtn.addEventListener('click', () => {
+    console.log('Lock button clicked');
+    sendLockerAction('lock');
+  });
 
   // Add event listener for try again button
   tryAgainBtn.addEventListener('click', returnToScanning);
@@ -250,6 +244,50 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
 
+  async function sendLockerAction(action) {
+    try {
+      const response = await fetch('/api/access/locker-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok || data.status !== 'ok') {
+        console.error(`Locker ${action} failed:`, response.status, data);
+        if (sessionNote) {
+          sessionNote.textContent = `Failed to ${action} locker: ${data.error || 'Unknown error'}`;
+        }
+        return;
+      }
+
+      // Success: locker action completed
+      console.log(`✓ Locker ${action}ed successfully`);
+      
+      // For lock action: show success message briefly then return to scanning
+      if (action === 'lock') {
+        if (sessionNote) {
+          sessionNote.textContent = '✓ Locker locked successfully! Returning to scanning mode...';
+        }
+        // Brief delay to show success message before resetting UI
+        setTimeout(() => {
+          returnToScanning();
+        }, 1500);
+      } else if (action === 'unlock') {
+        // Update note for unlock
+        if (sessionNote) {
+          sessionNote.textContent = 'Locker is unlocked. Lock it when finished or scan next member.';
+        }
+      }
+    } catch (error) {
+      console.error('Error sending locker action:', error);
+      if (sessionNote) {
+        sessionNote.textContent = `Error: ${error.message}`;
+      }
+    }
+  }
+
   // Disable scanning when user leaves page
   async function disableScanning() {
     try {
@@ -270,59 +308,24 @@ document.addEventListener('DOMContentLoaded', function() {
       const response = await fetch('/api/access-status');
       const data = await response.json();
 
-      // Success: locker unlocked
-      if (data.state === 'unlocked' && data.locker_id) {
-        lockerNumber.textContent = data.locker_id;
-        scanningState.style.display = 'none';
-        errorState.style.display = 'none';
-        successState.style.display = 'block';
-        scannerStatus.style.display = 'none';
-
-        // Stop polling and heartbeat temporarily
-        if (pollInterval) {
-          clearInterval(pollInterval);
-          pollInterval = null;
-        }
-        if (heartbeatInterval) {
-          clearInterval(heartbeatInterval);
-          heartbeatInterval = null;
-        }
-
-        // Start auto-return countdown
-        startAutoReturn();
+      if ((data.state === 'unlocked' || data.state === 'locked') && data.locker_id) {
+        // Access granted - redirect to member locker page with credentials
+        const memberName = encodeURIComponent(data.member_name || 'Member');
+        const lockerId = data.locker_id;
+        
+        // Store in localStorage as backup
+        localStorage.setItem('memberName', data.member_name || 'Member');
+        localStorage.setItem('lockerNumber', lockerId);
+        
+        // Redirect to the improved locker access page
+        window.location.href = `/user/locker-access?member=${memberName}&locker=${lockerId}`;
         return;
       }
 
-      // Error: access denied
       if (data.state === 'denied') {
         scanningState.style.display = 'none';
         successState.style.display = 'none';
         errorState.style.display = 'block';
-        scannerStatus.style.display = 'none';
-
-        // Stop polling and heartbeat temporarily
-        if (pollInterval) {
-          clearInterval(pollInterval);
-          pollInterval = null;
-        }
-        if (heartbeatInterval) {
-          clearInterval(heartbeatInterval);
-          heartbeatInterval = null;
-        }
-
-        // Auto-return to scanning after 5 seconds for retry
-        setTimeout(async () => {
-          errorState.style.display = 'none';
-          scanningState.style.display = 'block';
-
-          // Re-enable scanning
-          await enableScanning();
-
-          // Restart heartbeat and polling
-          heartbeatInterval = setInterval(sendHeartbeat, 15000);
-          pollInterval = setInterval(pollForAccess, 500);
-          pollForAccess();
-        }, 5000);
         return;
       }
 
@@ -334,7 +337,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
       }
 
-      // Still waiting for scan - keep scanning state visible.
+      // Waiting for next scan
       if (data.state === 'waiting') {
         scanningState.style.display = 'block';
         successState.style.display = 'none';
@@ -374,15 +377,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Cleanup when user leaves page
   window.addEventListener('beforeunload', function() {
-    if (autoReturnTimeout) {
-      clearInterval(autoReturnTimeout);
-    }
     disableScanning();
   });
   window.addEventListener('pagehide', function() {
-    if (autoReturnTimeout) {
-      clearInterval(autoReturnTimeout);
-    }
     disableScanning();
   });
 });

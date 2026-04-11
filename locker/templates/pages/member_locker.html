@@ -1,0 +1,373 @@
+{% extends "layouts/base.html" %}
+{% block title %}Locker Access{% endblock %}
+{% block body %}
+
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    background: linear-gradient(135deg, #f5f7fa 0%, #e8eef7 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+
+  .container {
+    width: 100%;
+    max-width: 600px;
+    padding: 16px;
+  }
+
+  .card {
+    background: white;
+    border-radius: 24px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+  }
+
+  .header {
+    background: linear-gradient(135deg, #0f6e56 0%, #0a4a37 100%);
+    padding: 40px 24px 24px;
+    text-align: center;
+    color: white;
+    position: relative;
+  }
+
+  .icon-wrapper {
+    width: 80px;
+    height: 80px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+    backdrop-filter: blur(10px);
+  }
+
+  .icon-wrapper svg {
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.1));
+  }
+
+  .header h1 {
+    font-size: 28px;
+    font-weight: 800;
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+
+  .header p {
+    font-size: 14px;
+    opacity: 0.95;
+    font-weight: 500;
+  }
+
+  .content {
+    padding: 32px 24px;
+  }
+
+  .member-info {
+    background: linear-gradient(135deg, #f0fdf9 0%, #e8fbf5 100%);
+    border: 1px solid rgba(15, 110, 86, 0.12);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 28px;
+    text-align: center;
+  }
+
+  .member-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: #0f6e56;
+    margin-bottom: 4px;
+  }
+
+  .locker-badge {
+    display: inline-block;
+    background: #0f6e56;
+    color: white;
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-top: 8px;
+  }
+
+  .status-message {
+    font-size: 13px;
+    color: #0f6e56;
+    margin-top: 12px;
+    font-weight: 500;
+    padding-top: 12px;
+    border-top: 1px solid rgba(15, 110, 86, 0.1);
+  }
+
+  .instructions {
+    background: #f4f6f9;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 28px;
+  }
+
+  .instructions-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #7a8fa6;
+    letter-spacing: 0.5px;
+    margin-bottom: 14px;
+  }
+
+  .instructions ol {
+    list-style-position: inside;
+    padding: 0;
+    margin: 0;
+  }
+
+  .instructions li {
+    font-size: 13px;
+    color: #1a2d3e;
+    line-height: 2;
+    font-weight: 500;
+  }
+
+  .button-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .btn {
+    padding: 14px 20px;
+    border-radius: 12px;
+    border: none;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    text-decoration: none;
+    display: block;
+    text-align: center;
+    width: 100%;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #0f6e56 0%, #0a4a37 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(15, 110, 86, 0.2);
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(15, 110, 86, 0.3);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .btn-secondary {
+    background: white;
+    color: #7a8fa6;
+    border: 1.5px solid #e2e8f0;
+  }
+
+  .btn-secondary:hover {
+    background: #f8f9fc;
+    border-color: #ccd5de;
+    transform: translateY(-1px);
+  }
+
+  .btn.disabled,
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .btn.disabled:hover,
+  .btn:disabled:hover {
+    transform: none;
+  }
+
+  @media (max-width: 480px) {
+    .header {
+      padding: 32px 16px 16px;
+    }
+
+    .header h1 {
+      font-size: 24px;
+    }
+
+    .content {
+      padding: 24px 16px;
+    }
+
+    .member-info {
+      padding: 18px;
+    }
+
+    .member-name {
+      font-size: 16px;
+    }
+  }
+</style>
+
+<div class="container">
+  <div class="card">
+    <!-- Header -->
+    <div class="header">
+      <div class="icon-wrapper">
+        <svg width="40" height="40" viewBox="0 0 32 32" fill="none">
+          <path d="M16 2C8.3 2 2 8.3 2 16s6.3 14 14 14 14-6.3 14-14S23.7 2 16 2zm-2 19l-5-5 1.4-1.4L14 18.2l7.6-7.6L23 12l-9 9z" fill="white"/>
+        </svg>
+      </div>
+      <h1>Access Granted</h1>
+      <p>Fingerprint authenticated successfully</p>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+      <!-- Member Info Card -->
+      <div class="member-info">
+        <div class="member-name" id="member-name">Marvin M. Fegi</div>
+        <div class="locker-badge">Locker #<span id="locker-number">1</span></div>
+        <p style="font-size: 13px; color: #7a8fa6; margin-top: 12px;">Your locker is now unlocked</p>
+        <div class="status-message">
+          <strong>⚠️ You must click "Lock Locker" to secure your locker after use</strong>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="button-group">
+        <button type="button" id="lock-btn" class="btn btn-primary">
+          🔒 Lock Locker
+        </button>
+        <button type="button" id="next-member-btn" class="btn btn-secondary">
+          Done / Next Member
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const lockBtn = document.getElementById('lock-btn');
+  const nextMemberBtn = document.getElementById('next-member-btn');
+  const memberNameEl = document.getElementById('member-name');
+  const lockerNumberEl = document.getElementById('locker-number');
+  const statusMessageEl = document.querySelector('.status-message strong');
+
+  // Set dynamic member info (from URL params or local storage)
+  const params = new URLSearchParams(window.location.search);
+  const memberName = params.get('member') || localStorage.getItem('memberName') || 'Member';
+  const lockerNumber = params.get('locker') || localStorage.getItem('lockerNumber') || '1';
+
+  memberNameEl.textContent = memberName;
+  lockerNumberEl.textContent = lockerNumber;
+
+  // Lock button handler
+  lockBtn.addEventListener('click', async function() {
+    lockBtn.disabled = true;
+    const originalText = lockBtn.textContent;
+    lockBtn.textContent = '⏳ Sending lock command...';
+    
+    const lockerId = parseInt(lockerNumberEl.textContent);
+    
+    console.log('🔒 LOCK BUTTON CLICKED');
+    console.log('   Locker ID:', lockerId);
+    console.log('   Member:', memberName);
+    
+    try {
+      // Step 1: Send lock request to backend
+      console.log('   📤 Sending POST to /api/access/locker-action');
+      const response = await fetch('/api/access/locker-action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'lock',
+          locker_id: lockerId  // Send locker ID in request
+        })
+      });
+
+      console.log('   ✓ Response received. Status:', response.status);
+      
+      const data = await response.json();
+      console.log('   📦 Response data:', data);
+      
+      if (response.ok) {
+        console.log('   ✓✓✓ LOCK SUCCESSFUL ✓✓✓');
+        console.log('   Backend confirmed:', data);
+        lockBtn.textContent = '✓ Locker Locked!';
+        lockBtn.style.backgroundColor = '#0f6e56';
+        lockBtn.disabled = true;
+        nextMemberBtn.disabled = false;
+        nextMemberBtn.textContent = 'Done / Next Member';
+        nextMemberBtn.classList.remove('disabled');
+
+        if (statusMessageEl) {
+          statusMessageEl.textContent = 'Locker is locked. Click Done / Next Member to end your session.';
+        }
+
+        // Clear the session state so the access page does not redirect back
+        await fetch('/api/access/clear-locker-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }).catch(err => console.warn('Unable to clear locker state:', err));
+
+        localStorage.removeItem('memberName');
+        localStorage.removeItem('lockerNumber');
+      } else {
+        console.error('   ✗ Lock failed. Status:', response.status, 'Error:', data.error);
+        lockBtn.textContent = originalText;
+        lockBtn.disabled = false;
+        
+        // Show detailed error message
+        const errorMsg = `Lock Failed (HTTP ${response.status})\n\nError: ${data.error || 'Unknown error'}\n\nCheck:\n1. ESP32 is online\n2. Relay is wired correctly\n3. Backend logs for details`;
+        alert(errorMsg);
+        console.error('   Full response:', data);
+      }
+    } catch (error) {
+      console.error('   ✗ Network or parsing error:', error);
+      lockBtn.textContent = originalText;
+      lockBtn.disabled = false;
+      
+      const errorMsg = `Network Error\n\n${error.message}\n\nCheck:\n1. Backend server is running\n2. Network connection is stable\n3. Check browser console for details`;
+      alert(errorMsg);
+    }
+  });
+
+  // Next member button handler
+  nextMemberBtn.addEventListener('click', async function() {
+    nextMemberBtn.disabled = true;
+    nextMemberBtn.textContent = 'Ending session...';
+
+    try {
+      await fetch('/api/access/clear-locker-state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+    } catch (err) {
+      console.warn('Unable to clear locker state:', err);
+    }
+
+    localStorage.removeItem('memberName');
+    localStorage.removeItem('lockerNumber');
+    window.location.href = '/user/access';
+  });
+});
+</script>
+
+{% endblock %}

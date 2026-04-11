@@ -503,12 +503,14 @@
       <h5 class="settings-title">Admin User Management</h5>
       <p class="text-muted small mb-4">
         View administrator accounts and status. Full admin account management is currently read-only.
+        Use the numeric admin ID when tracking guest card audit operations.
       </p>
 
       <div style="overflow-x: auto;">
         <table class="admin-table">
           <thead>
             <tr>
+              <th>ID</th>
               <th>Username</th>
               <th>Email</th>
               <th>Role</th>
@@ -519,6 +521,7 @@
           <tbody>
             {% for admin in admin_users %}
             <tr>
+              <td>{{ admin.id }}</td>
               <td>{{ admin.username }}</td>
               <td>{{ admin.email }}</td>
               <td><span class="badge-super">{{ admin.role }}</span></td>
