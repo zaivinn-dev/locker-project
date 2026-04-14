@@ -364,12 +364,19 @@ def init_db() -> None:
                   return_admin_id INTEGER,
                   checkout_notes TEXT,
                   return_notes TEXT,
+                  locker_id INTEGER,
                   FOREIGN KEY (guest_id) REFERENCES members(id),
                   FOREIGN KEY (checkout_admin_id) REFERENCES members(id),
                   FOREIGN KEY (return_admin_id) REFERENCES members(id)
                 )
                 """
             )
+
+        try:
+            conn.execute("ALTER TABLE guest_rfid_cards ADD COLUMN locker_id INTEGER")
+        except Exception as exc:
+            if not _column_exists_error(exc):
+                raise
 
         _drop_guest_rfid_uid_unique_constraint(conn)
 

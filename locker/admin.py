@@ -781,6 +781,14 @@ def admin_rfid():
             base_query += " AND REPLACE(m.expiry_date, 'T', ' ') < ?"
             params.append(now_local)
 
+        base_query += " AND NOT EXISTS (\n"
+        base_query += "            SELECT 1 FROM guest_rfid_cards grc\n"
+        base_query += "            WHERE grc.guest_id = m.id\n"
+        base_query += "              AND grc.issue_time = (\n"
+        base_query += "                  SELECT MAX(issue_time) FROM guest_rfid_cards grc2 WHERE grc2.guest_id = m.id\n"
+        base_query += "              )\n"
+        base_query += "              AND grc.status IN ('RETURNED', 'BLACKLISTED', 'LOST')\n"
+        base_query += "        )"
         base_query += " GROUP BY m.id, m.full_name, m.rfid_uid, m.locker_id, m.expiry_date, m.category, m.created_at"
 
         sort_column_map = {
@@ -793,6 +801,61 @@ def admin_rfid():
 
         guests = conn.execute(base_query, params).fetchall()
 
+        total_guests = conn.execute(
+            "SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest'"
+        ).fetchone()["c"]
+
+        active_count = conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM members m
+            WHERE m.member_type = 'guest'
+              AND EXISTS (
+                  SELECT 1 FROM guest_rfid_cards grc
+                  WHERE grc.guest_id = m.id
+                    AND grc.issue_time = (
+                        SELECT MAX(issue_time) FROM guest_rfid_cards grc2 WHERE grc2.guest_id = m.id
+                    )
+                    AND grc.status = 'ACTIVE'
+                    AND grc.expires_at >= ?
+              )
+            """,
+            (now_local,),
+        ).fetchone()["c"]
+
+        expired_count = conn.execute(
+            """
+            SELECT COUNT(*) AS c
+            FROM members m
+            WHERE m.member_type = 'guest'
+              AND EXISTS (
+                  SELECT 1 FROM guest_rfid_cards grc
+                  WHERE grc.guest_id = m.id
+                    AND grc.issue_time = (
+                        SELECT MAX(issue_time) FROM guest_rfid_cards grc2 WHERE grc2.guest_id = m.id
+                    )
+                    AND (
+                        grc.status = 'EXPIRED'
+                        OR (grc.status = 'ACTIVE' AND grc.expires_at < ?)
+                    )
+              )
+            """,
+            (now_local,),
+        ).fetchone()["c"]
+
+        total_revenue = conn.execute(
+            """
+            SELECT COALESCE(SUM(p.amount), 0) AS total
+            FROM payments p
+            JOIN members m ON p.member_id = m.id
+            WHERE m.member_type = 'guest'
+            """
+        ).fetchone()["total"]
+
+        total_access_events = conn.execute(
+            "SELECT COUNT(*) AS c FROM access_logs WHERE actor_type = 'guest'"
+        ).fetchone()["c"]
+
     guests = [dict(g) for g in guests]
     def is_card_active(guest):
         if guest.get('card_status') != 'ACTIVE':
@@ -801,15 +864,11 @@ def admin_rfid():
             return guest['card_expires_at'] >= now_local
         return True
 
-    active_count = sum(1 for guest in guests if is_card_active(guest))
-    expired_count = len(guests) - active_count
     card_active_count = sum(1 for guest in guests if guest.get('card_status') == 'ACTIVE')
     card_expired_count = sum(1 for guest in guests if guest.get('card_status') == 'EXPIRED' or (guest.get('card_status') == 'ACTIVE' and guest.get('card_expires_at') and guest['card_expires_at'] < now_local))
     card_returned_count = sum(1 for guest in guests if guest.get('card_status') == 'RETURNED')
     card_blacklisted_count = sum(1 for guest in guests if guest.get('card_status') == 'BLACKLISTED')
     card_lost_count = sum(1 for guest in guests if guest.get('card_status') == 'LOST')
-    total_revenue = sum(guest.get('total_payments', 0) for guest in guests)
-    total_access_events = sum(guest.get('total_access_events', 0) for guest in guests)
 
     return render_template(
         "admin/pages/admin_rfid.html",
@@ -908,10 +967,12 @@ def admin_lockers():
         # Transform to list of dicts for template
         lockers = []
         for row in lockers_data:
+            locker_type = 'member' if row["id"] in (1, 2) else 'guest'
             locker = {
                 "id": row["id"],
                 "label": row["label"],
                 "status": row["status"],
+                "type": locker_type,
                 "assigned_to": None
             }
             if row["member_id"]:
@@ -928,8 +989,15 @@ def admin_lockers():
         # Summary stats
         stats = {
             "total": len(lockers),
-            "available": sum(1 for l in lockers if l["status"] == "available"),
-            "occupied": sum(1 for l in lockers if l["status"] == "occupied"),
+            "available": sum(
+                1 for l in lockers
+                if (l["type"] == "member" and l["assigned_to"] is None)
+                or (l["type"] == "guest" and l["assigned_to"] is None and l["status"] == "available")
+            ),
+            "occupied": sum(
+                1 for l in lockers
+                if l["type"] == "guest" and l["status"] == "occupied"
+            ),
             "assigned": sum(1 for l in lockers if l["assigned_to"] is not None)
         }
     
@@ -978,6 +1046,7 @@ def admin_get_available_lockers():
             FROM lockers l
             LEFT JOIN members m ON l.id = m.locker_id AND m.member_type = 'guest'
             WHERE m.id IS NULL
+              AND l.id IN (3, 4)
             ORDER BY l.id
             """
         ).fetchall()
@@ -1053,7 +1122,7 @@ def admin_extend_guest_access():
         return {"error": "Unauthorized"}, 401
 
     guest_id = request.form.get("guest_id")
-    additional_hours = int(request.form.get("additional_hours", 24))
+    additional_hours = 24
 
     if not guest_id:
         return {"error": "Guest ID required"}, 400
@@ -1090,10 +1159,10 @@ def admin_extend_guest_access():
         # Log the extension
         conn.execute(
             "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-            ("admin", str(guest_id), "access_extended", f"Extended by {additional_hours} hours until {new_expiry.strftime('%Y-%m-%d %H:%M:%S')}"),
+            ("admin", str(guest_id), "access_extended", f"Extended by 24 hours until {new_expiry.strftime('%Y-%m-%d %H:%M:%S')}"),
         )
 
-    return {"success": True, "message": f"Access extended by {additional_hours} hours"}
+    return {"success": True, "message": "Access extended by 24 hours"}
 
 
 @admin_bp.get("/export-guests")
@@ -1219,15 +1288,15 @@ def admin_create_guest():
     full_name = (request.form.get("full_name") or "").strip()
     rfid_uid = (request.form.get("rfid_uid") or "").strip() or None
     locker_id_raw = (request.form.get("locker_id") or "").strip()
-    duration_hours = request.form.get("duration_hours")
     category = (request.form.get("category") or "regular").strip().lower() or "regular"
     payment_amount = 35 if category == "student" else 40
+    duration_hours = 24
     
     if not full_name:
         return {"error": "Full name is required"}, 400
     
     locker_id = int(locker_id_raw) if locker_id_raw.isdigit() else None
-    duration_hours = int(duration_hours) if duration_hours else 0
+    duration_hours = 24
     
     with connect() as conn:
         existing = None
@@ -1300,7 +1369,7 @@ def admin_create_guest():
                 return {"error": "Locker not found"}, 404
         
         # Create guest (instant access, paid automatically based on category)
-        expiry_date = (datetime.now() + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M:%S") if duration_hours > 0 else None
+        expiry_date = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
         cur = conn.execute(
             """
             INSERT INTO members (full_name, rfid_uid, locker_id, status, payment_status, 
@@ -1313,13 +1382,13 @@ def admin_create_guest():
 
         if rfid_uid:
             now = datetime.now()
-            expires_at = (now + timedelta(hours=duration_hours)).strftime("%Y-%m-%d %H:%M:%S") if duration_hours > 0 else now.strftime("%Y-%m-%d %H:%M:%S")
-            expected_return_time = (now + timedelta(hours=duration_hours + 1)).strftime("%Y-%m-%d %H:%M:%S") if duration_hours > 0 else None
+            expires_at = (now + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+            expected_return_time = (now + timedelta(hours=25)).strftime("%Y-%m-%d %H:%M:%S")
             conn.execute(
                 """
                 INSERT INTO guest_rfid_cards
-                    (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes)
-                VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, ?)
+                    (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes, locker_id)
+                VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     guest_id,
@@ -1329,6 +1398,7 @@ def admin_create_guest():
                     expected_return_time,
                     session.get("admin_id", 1),
                     "Guest created with RFID card",
+                    locker_id,
                 ),
             )
             conn.execute(

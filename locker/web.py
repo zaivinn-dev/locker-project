@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from flask import Flask, redirect, render_template, request, session, url_for
+from requests.exceptions import RequestException
 
 import os
 
@@ -39,6 +40,19 @@ except ImportError:
 
 # Global device controller instance - lazy initialized
 device = None
+
+# Locker assignments for separate member/guest access
+MEMBER_LOCKER_IDS = (1, 2)
+GUEST_LOCKER_IDS = (3, 4)
+
+
+def is_member_locker(locker_id: int) -> bool:
+    return locker_id in MEMBER_LOCKER_IDS
+
+
+def is_guest_locker(locker_id: int) -> bool:
+    return locker_id in GUEST_LOCKER_IDS
+
 
 def get_device():
     global device
@@ -281,9 +295,15 @@ def create_app() -> Flask:
         if not locker_id:
             return {"status": "failed", "reason": "no locker assigned"}, 409
 
+        # Enforce guest-only locker assignments.
+        if locker_id not in GUEST_LOCKER_IDS:
+            return {"status": "denied", "reason": "locker_not_guest_accessible"}, 403
+
         # Toggle locker state based on current device state.
         try:
             locker_state = get_device().get_locker(int(locker_id))
+        except RequestException as exc:
+            return {"status": "error", "reason": "device_unreachable", "message": str(exc)}, 503
         except Exception as exc:
             return {"status": "error", "reason": "device_unavailable", "message": str(exc)}, 500
 
@@ -291,12 +311,16 @@ def create_app() -> Flask:
             new_state = "unlocked"
             try:
                 get_device().unlock(int(locker_id))
+            except RequestException as exc:
+                return {"status": "error", "reason": "device_unreachable", "message": str(exc)}, 503
             except Exception as exc:
                 return {"status": "error", "reason": "unlock_failed", "message": str(exc)}, 500
         else:
             new_state = "locked"
             try:
                 get_device().lock(int(locker_id))
+            except RequestException as exc:
+                return {"status": "error", "reason": "device_unreachable", "message": str(exc)}, 503
             except Exception as exc:
                 return {"status": "error", "reason": "lock_failed", "message": str(exc)}, 500
 
@@ -366,8 +390,31 @@ def create_app() -> Flask:
         if not locker_id:
             return {"status": "failed", "reason": "no locker assigned"}, 409
 
+        if not is_member_locker(int(locker_id)):
+            print(f"[FINGERPRINT ACCESS] ✗ Member locker assignment invalid for locker {locker_id}")
+            return {"status": "denied", "reason": "locker_not_member_accessible"}, 403
+
         print(f"[FINGERPRINT ACCESS] ✓ Member {member['full_name']} (ID={member['id']}) matched - unlocking locker {locker_id}")
-        get_device().unlock(int(locker_id))
+        try:
+            get_device().unlock(int(locker_id))
+        except RequestException as exc:
+            print(f"[FINGERPRINT ACCESS] ✗ ESP32 connection error: {exc}")
+            access_status_state["state"] = "error"
+            access_status_state["locker_id"] = locker_id
+            access_status_state["member_id"] = member["id"]
+            access_status_state["member_name"] = member["full_name"]
+            access_status_state["message"] = "ESP32 device not reachable"
+            access_status_state["updated_at"] = datetime.now(timezone.utc)
+            return {"status": "error", "reason": "device_unreachable", "message": "ESP32 device not reachable"}, 503
+        except Exception as exc:
+            print(f"[FINGERPRINT ACCESS] ✗ ESP32 unlock error: {exc}")
+            access_status_state["state"] = "error"
+            access_status_state["locker_id"] = locker_id
+            access_status_state["member_id"] = member["id"]
+            access_status_state["member_name"] = member["full_name"]
+            access_status_state["message"] = "ESP32 unlock command failed"
+            access_status_state["updated_at"] = datetime.now(timezone.utc)
+            return {"status": "error", "reason": "device_error", "message": str(exc)}, 502
         with connect() as conn:
             conn.execute(
                 "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
@@ -576,6 +623,14 @@ def create_app() -> Flask:
                 new_state = "unlocked"
                 message = f"Locker {locker_id} unlocked. Scan next member or lock again."
                 log_action = "member_locker_unlocked"
+        except RequestException as e:
+            print(f"[LOCKER ACTION] ✗ ESP32 connection error: {type(e).__name__}: {e}")
+            with connect() as conn:
+                conn.execute(
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("member", str(member_id), f"member_locker_{action}_failed", f"locker_id={locker_id}; member={member_name}; error={str(e)}"),
+                )
+            return {"status": "error", "reason": "device_unreachable", "message": str(e)}, 503
         except Exception as e:
             print(f"[LOCKER ACTION] ✗ Failed to {action} locker {locker_id}: {type(e).__name__}: {e}")
             with connect() as conn:
@@ -633,7 +688,12 @@ def create_app() -> Flask:
         except (ValueError, IndexError):
             return {"error": "invalid uid format"}, 400
         
-        # Update locker status in database
+        # Ignore IR occupancy events for member lockers entirely.
+        # Only guest lockers 3 and 4 are instrumented with IR sensors.
+        if not is_guest_locker(locker_id):
+            return {"success": True, "uid": uid, "status": status, "ignored": True}
+
+        # Update guest locker IR status in database
         with connect() as conn:
             conn.execute(
                 "UPDATE lockers SET status = ? WHERE id = ?",
@@ -729,9 +789,10 @@ def create_app() -> Flask:
             return redirect(url_for("user_register_form"))
 
         with connect() as conn:
-            # Get all 4 lockers with their status and check assignments (member or guest)
+            # Only member-assigned locker IDs may be chosen during member registration.
             lockers = conn.execute(
-                """SELECT id, label, status, 
+                """SELECT id, label,
+                   CASE WHEN id IN (1, 2) THEN 'member' ELSE 'guest' END AS locker_type,
                    CASE WHEN EXISTS(
                      SELECT 1 FROM members 
                      WHERE locker_id = lockers.id 
@@ -765,9 +826,12 @@ def create_app() -> Flask:
         locker_id = int(locker_id_raw)
 
         with connect() as conn:
-            # Ensure locker is available (not occupied by IR AND no member/guest assigned)
+            if locker_id not in MEMBER_LOCKER_IDS:
+                return redirect(url_for("user_select_locker"))
+
+            # Ensure locker is available and not already assigned to any approved member or active guest
             locker = conn.execute(
-                """SELECT id FROM lockers WHERE id = ? AND status = 'available'
+                """SELECT id FROM lockers WHERE id = ? 
                    AND NOT EXISTS(
                      SELECT 1 FROM members 
                      WHERE locker_id = ? 
@@ -943,7 +1007,7 @@ def create_app() -> Flask:
         data = request.get_json(silent=True) or {}
         guest_id = data.get("guest_id")
         rfid_uid = (data.get("rfid_uid") or "").strip()
-        hours_valid = data.get("hours_valid", 24)  # Card valid for N hours
+        hours_valid = 24
         admin_id = data.get("admin_id") or session.get("admin_id")
         checkout_notes = (data.get("notes") or "").strip()
         
@@ -960,7 +1024,7 @@ def create_app() -> Flask:
         with connect() as conn:
             # Verify guest exists
             guest = conn.execute(
-                "SELECT id, full_name FROM members WHERE id = ? AND member_type = 'guest'",
+                "SELECT id, full_name, locker_id FROM members WHERE id = ? AND member_type = 'guest'",
                 (guest_id,),
             ).fetchone()
             
@@ -984,19 +1048,28 @@ def create_app() -> Flask:
             
             # Reuse a returned or expired card record if the same RFID is being reissued.
             now = datetime.now()
-            expires_at = now + timedelta(hours=hours_valid)
-            expected_return = now + timedelta(hours=hours_valid + 1)  # 1 hour grace period
+            expires_at = now + timedelta(hours=24)
+            expected_return = now + timedelta(hours=25)  # 1 hour grace period
             
             if existing and existing["status"] in ("EXPIRED", "RETURNED"):
                 conn.execute(
                     """INSERT INTO guest_rfid_cards
-                       (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes)
-                       VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, ?)""",
-                    (guest_id, rfid_uid, now.isoformat(), expires_at.isoformat(), expected_return.isoformat(), admin_id, checkout_notes or "Card issued by admin"),
+                       (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes, locker_id)
+                       VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?)""",
+                    (
+                        guest_id,
+                        rfid_uid,
+                        now.isoformat(),
+                        expires_at.isoformat(),
+                        expected_return.isoformat(),
+                        admin_id,
+                        checkout_notes or "Card issued by admin",
+                        guest.get("locker_id"),
+                    ),
                 )
                 conn.execute(
                     "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                    ("admin", str(admin_id or "unknown"), "card_reissued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; valid_hours={hours_valid}"),
+                    ("admin", str(admin_id or "unknown"), "card_reissued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; valid_hours=24"),
                 )
                 return {
                     "status": "ok",
@@ -1009,16 +1082,25 @@ def create_app() -> Flask:
             # Create card record
             conn.execute(
                 """INSERT INTO guest_rfid_cards 
-                   (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (guest_id, rfid_uid, "ACTIVE", now.isoformat(), expires_at.isoformat(), 
-                 expected_return.isoformat(), admin_id, checkout_notes or "Card issued by admin"),
+                   (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes, locker_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    guest_id,
+                    rfid_uid,
+                    "ACTIVE",
+                    now.isoformat(),
+                    expires_at.isoformat(),
+                    expected_return.isoformat(),
+                    admin_id,
+                    checkout_notes or "Card issued by admin",
+                    guest.get("locker_id"),
+                ),
             )
             
             # Log the card issuance
             conn.execute(
                 "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                ("admin", str(admin_id or "unknown"), "card_issued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; valid_hours={hours_valid}"),
+                ("admin", str(admin_id or "unknown"), "card_issued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; valid_hours=24"),
             )
         
         return {
@@ -1057,6 +1139,10 @@ def create_app() -> Flask:
             # Check if guest already has a locker assigned
             if guest["locker_id"]:
                 return {"error": "guest_already_has_locker", "current_locker": guest["locker_id"]}, 409
+
+            # Enforce guest-only locker assignments.
+            if locker_id not in GUEST_LOCKER_IDS:
+                return {"error": "locker_not_guest_accessible", "locker_id": locker_id}, 403
             
             # Check if locker is available (not assigned to anyone)
             existing_assignment = conn.execute(
@@ -1124,19 +1210,29 @@ def create_app() -> Flask:
             guest_id = (card or legacy_guest)["guest_id"]
             
             # Update card status to LOST and BLACKLIST it
+            locker_row = conn.execute(
+                "SELECT locker_id FROM members WHERE id = ?",
+                (guest_id,),
+            ).fetchone()
+            locker_id = locker_row["locker_id"] if locker_row and locker_row["locker_id"] else None
+
             if card:
                 conn.execute(
                     """UPDATE guest_rfid_cards 
-                       SET status = 'BLACKLISTED', return_notes = ?
+                       SET status = 'BLACKLISTED', return_notes = ?, locker_id = ?
                        WHERE rfid_uid = ?""",
-                    (f"LOST - {notes}" if notes else "LOST - Card marked by admin", rfid_uid),
+                    (
+                        f"LOST - {notes}" if notes else "LOST - Card marked by admin",
+                        locker_id,
+                        rfid_uid,
+                    ),
                 )
             else:
                 from datetime import datetime
                 expires_at = legacy_guest["expiry_date"]
                 issue_time = datetime.now().isoformat()
                 conn.execute(
-                    "INSERT INTO guest_rfid_cards (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, return_notes) VALUES (?, ?, 'BLACKLISTED', ?, ?, ?, ?)",
+                    "INSERT INTO guest_rfid_cards (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, return_notes, locker_id) VALUES (?, ?, 'BLACKLISTED', ?, ?, ?, ?, ?)",
                     (
                         guest_id,
                         rfid_uid,
@@ -1144,6 +1240,7 @@ def create_app() -> Flask:
                         expires_at,
                         expires_at,
                         f"LOST - {notes}" if notes else "LOST - Card marked by admin",
+                        locker_id,
                     ),
                 )
             
@@ -1194,19 +1291,25 @@ def create_app() -> Flask:
                         "message": f"RFID card {rfid_uid} was not found or is not registered in the system.",
                     }, 404
 
+            locker_row = conn.execute(
+                "SELECT locker_id FROM members WHERE id = ?",
+                (guest_id,),
+            ).fetchone()
+            locker_id = locker_row["locker_id"] if locker_row and locker_row["locker_id"] else None
+
             if card:
                 cursor = conn.execute(
                     """UPDATE guest_rfid_cards 
-                       SET status = 'RETURNED', return_admin_id = ?, actual_return_time = ?, return_notes = ?
+                       SET status = 'RETURNED', return_admin_id = ?, actual_return_time = ?, return_notes = ?, locker_id = ?
                        WHERE rfid_uid = ?""",
-                    (admin_id, datetime.now().isoformat(), notes or "Returned to admin", rfid_uid),
+                    (admin_id, datetime.now().isoformat(), notes or "Returned to admin", locker_id, rfid_uid),
                 )
             else:
                 from datetime import datetime
                 expires_at = legacy_guest["expiry_date"]
                 issue_time = datetime.now().isoformat()
                 cursor = conn.execute(
-                    "INSERT INTO guest_rfid_cards (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, actual_return_time, return_admin_id, return_notes) VALUES (?, ?, 'RETURNED', ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO guest_rfid_cards (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, actual_return_time, return_admin_id, return_notes, locker_id) VALUES (?, ?, 'RETURNED', ?, ?, ?, ?, ?, ?, ?)",
                     (
                         legacy_guest["guest_id"],
                         rfid_uid,
@@ -1216,6 +1319,7 @@ def create_app() -> Flask:
                         datetime.now().isoformat(),
                         admin_id,
                         notes or "Returned to admin",
+                        locker_id,
                     ),
                 )
 
@@ -1299,7 +1403,8 @@ def create_app() -> Flask:
         now = datetime.now().isoformat()
 
         card_rows = conn.execute(
-            """SELECT grc.*, m.full_name as guest_name, m.contact_number, m.locker_id
+            """SELECT grc.*, m.full_name as guest_name, m.contact_number, 
+                      COALESCE(grc.locker_id, m.locker_id) as locker_id
                    FROM guest_rfid_cards grc
                    LEFT JOIN members m ON grc.guest_id = m.id
                    ORDER BY grc.issue_time DESC""",
@@ -1328,6 +1433,7 @@ def create_app() -> Flask:
             card["checkout_notes"] = "Legacy guest RFID card"
             card["return_notes"] = None
             card["guest_id"] = card.get("guest_id")
+            card["locker_id"] = card.get("locker_id")
             cards.append(card)
 
         for card in cards:
@@ -1366,6 +1472,10 @@ def create_app() -> Flask:
                 )
             
             return {"status": "ok", "message": f"Locker {locker_id} force-locked"}
+        except RequestException as e:
+            msg = f"ESP32 unreachable during force-lock: {str(e)}"
+            print(f"[ADMIN] {msg}")
+            return {"status": "error", "reason": "device_unreachable", "error": msg}, 503
         except Exception as e:
             msg = f"Failed to force-lock locker: {str(e)}"
             print(f"[ADMIN] {msg}")
@@ -1405,9 +1515,20 @@ def create_app() -> Flask:
     @app.get("/api/admin/card-audit-history")
     def admin_card_audit_history():
         """Generate a full guest card audit history list."""
+        q = (request.args.get("q") or "").strip()
         with connect() as conn:
             cards_list = _load_card_audit_records(conn)
-            
+            if q:
+                q_lower = q.lower()
+                cards_list = [
+                    card for card in cards_list
+                    if q_lower in (card.get("rfid_uid") or "").lower()
+                    or q_lower in (card.get("guest_name") or "").lower()
+                    or q_lower in str(card.get("locker_id") or "")
+                    or q_lower in (card.get("status") or "").lower()
+                    or q_lower in (card.get("checkout_notes") or "").lower()
+                    or q_lower in (card.get("return_notes") or "").lower()
+                ]
             history = {
                 "generated_at": datetime.now().isoformat(),
                 "total_records": len(cards_list),

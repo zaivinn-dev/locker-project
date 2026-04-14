@@ -16,16 +16,16 @@
 #define RELAY_3_PIN 27
 #define RELAY_4_PIN 32
 
-// ========== IR SENSORS (2 per locker, 8 total) ==========
-// Locker 1: GPIO 33, 34
-// Locker 2: GPIO 35, 36
+// ========== IR SENSORS (guest lockers 3 and 4 only, 4 total) ==========
+// Locker 1: no IR sensors
+// Locker 2: no IR sensors
 // Locker 3: GPIO 37, 38
 // Locker 4: GPIO 39, 21 (Changed GPIO 4 to 21 - GPIO 4 conflicts with ADC2/WiFi)
 const int IR_SENSOR_PINS[4][2] = {
-  {33, 34},   // Locker 1
-  {35, 36},   // Locker 2
+  {-1, -1},   // Locker 1 (no IR)
+  {-1, -1},   // Locker 2 (no IR)
   {37, 38},   // Locker 3
-  {39, 21}   // Locker 4 - GPIO 21 is safe for ADC1
+  {39, 21}    // Locker 4 - GPIO 21 is safe for ADC1
 };
 
 const char* WIFI_SSID = "Emelon Wifi";
@@ -40,7 +40,7 @@ const unsigned long FINGERPRINT_POLL_INTERVAL = 100; // Poll fingerprint sensor 
 const int FINGERPRINT_RX_PIN = 16;
 const int FINGERPRINT_TX_PIN = 17;
 const unsigned long RELAY_ACTIVATION_TIME = 2000;  // 2 seconds
-const unsigned long RFID_READ_DEBOUNCE = 250;  // 250ms between reads for faster card response
+const unsigned long RFID_READ_DEBOUNCE = 100;  // 100ms between reads for faster card response
 
 String getHttpClientErrorName(int code) {
   switch (code) {
@@ -60,18 +60,17 @@ String getHttpClientErrorName(int code) {
 }
 
 bool beginBackendRequest(HTTPClient &http, const char *url, int timeoutMs) {
-  http.setReuse(false);
+  http.setReuse(true);
   http.setTimeout(timeoutMs);
   if (!http.begin(url)) {
     return false;
   }
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
-  http.addHeader("Connection", "close");
   return true;
 }
 
-int postJsonPayload(const char *url, const String &payload, String &response, int timeoutMs = 5000) {
+int postJsonPayload(const char *url, const String &payload, String &response, int timeoutMs = 2000) {
   HTTPClient http;
   int httpCode = -1;
 
@@ -157,7 +156,7 @@ const unsigned long OFFLINE_TIMEOUT = 30000;  // 30 seconds without WiFi = offli
 // Fingerprint scan permission tracking
 bool scanPermissionAllowed = false;
 unsigned long lastScanPermissionCheck = 0;
-const unsigned long SCAN_PERMISSION_POLL_INTERVAL = 500;  // Check scan enable state every 0.5 seconds
+const unsigned long SCAN_PERMISSION_POLL_INTERVAL = 200;  // Check scan enable state every 0.2 seconds
 
 // Guest RFID tap-to-toggle tracking
 String currentRfidUID = "";             // UID currently being processed by backend
@@ -165,10 +164,8 @@ String lastUnlockedGuestUID = "";       // Last guest UID that opened a locker
 int lastUnlockedGuestLockerIndex = -1;    // Locker index opened by the last guest UID
 bool guestTapUnlock[4] = {false, false, false, false};  // Guest tap-to-toggle session state
 
-// Smart Auto-Lock Tracking
+// Locker unlocked tracking
 bool lockerUnlocked[4] = {false, false, false, false};  // Relay unlocked state per locker
-unsigned long lockerUnlockTime[4] = {0, 0, 0, 0};  // Time when each locker was unlocked
-const unsigned long AUTO_LOCK_DELAY = 6000;  // 20 seconds from door UNLOCK before solenoid locks - gives user plenty of time to close, arrange, and step away
 
 // Locker occupancy tracking (one per locker)
 bool lockerOccupied[4] = {false, false, false, false};  // Detected state (updated every read)
@@ -440,15 +437,15 @@ void setupFingerprintSensor() {
 }
 
 void setupIRSensor() {
-  Serial.println("🔧 Setting up IR sensors (4 lockers x 2 sensors)...");
+  Serial.println("🔧 Setting up IR sensors for guest lockers 3 and 4 only...");
   
-  for (int locker = 0; locker < 4; locker++) {
+  for (int locker = 2; locker < 4; locker++) {
     for (int sensor = 0; sensor < 2; sensor++) {
       int pin = IR_SENSOR_PINS[locker][sensor];
       pinMode(pin, INPUT);
     }
     
-    // Read initial state
+    // Read initial state for guest lockers only
     // INVERTED LOGIC: LOW value (< threshold) = object detected
     bool sensorA = (analogRead(IR_SENSOR_PINS[locker][0]) < IR_DETECTION_THRESHOLD);
     bool sensorB = (analogRead(IR_SENSOR_PINS[locker][1]) < IR_DETECTION_THRESHOLD);
@@ -476,8 +473,8 @@ void irSensorTask(void * parameter) {
   while (true) {
     unsigned long loopStartTime = millis();
     
-    // ========== CHECK ALL 4 LOCKERS ==========
-    for (int locker = 0; locker < 4; locker++) {
+    // ========== CHECK GUEST LOCKERS ONLY (Locker 3 and 4) ==========
+    for (int locker = 2; locker < 4; locker++) {
       
       // ========== SENSOR A (First sensor) ==========
       {
@@ -498,8 +495,6 @@ void irSensorTask(void * parameter) {
         } else if (irSmoothed[locker][0] > (thisThreshold + IR_HYSTERESIS)) {
           irDetectionThreshold[locker][0] = thisThreshold - IR_HYSTERESIS;  // Lower threshold
         }
-        
-        bool detected = (irSmoothed[locker][0] < IR_DETECTION_THRESHOLD);
       }
       
       // ========== SENSOR B (Second sensor) ==========
@@ -521,8 +516,6 @@ void irSensorTask(void * parameter) {
         } else if (irSmoothed[locker][1] > (thisThreshold + IR_HYSTERESIS)) {
           irDetectionThreshold[locker][1] = thisThreshold - IR_HYSTERESIS;
         }
-        
-        bool detected = (irSmoothed[locker][1] < IR_DETECTION_THRESHOLD);
       }
       
       // ========== DETERMINE LOCKER STATE ==========
@@ -543,19 +536,6 @@ void irSensorTask(void * parameter) {
           // State change detected!
           if (currentState) {
             Serial.println("\n⚡ OCCUPANCY CHANGE: " + LOCKER_NAMES[locker] + " → OCCUPIED (IR: " + String((int)irSmoothed[locker][0]) + ", " + String((int)irSmoothed[locker][1]) + ")");
-            
-            // DISABLED: Auto-lock when door closes
-            // Members must manually click "Lock Locker" button
-            // if (lockerUnlocked[locker]) {
-            //   unsigned long timeSinceUnlock = millis() - lockerUnlockTime[locker];
-            //   if (timeSinceUnlock > AUTO_LOCK_DELAY) {
-            //     Serial.println("   🔐 AUTO-LOCKING NOW...");
-            //     autoLockLocker(locker);
-            //   } else {
-            //     unsigned long remainingTime = AUTO_LOCK_DELAY - timeSinceUnlock;
-            //     Serial.println("   ⏳ Door closed. Auto-lock in " + String(remainingTime / 1000) + "s...");
-            //   }
-            // }
           } else {
             Serial.println("\n⚡ OCCUPANCY CHANGE: " + LOCKER_NAMES[locker] + " → EMPTY (IR: " + String((int)irSmoothed[locker][0]) + ", " + String((int)irSmoothed[locker][1]) + ")");
           }
@@ -568,14 +548,6 @@ void irSensorTask(void * parameter) {
         lockerStateConfirm[locker] = 1;
       }
       
-      // ========== TIMEOUT PROTECTION ==========
-      if (lockerUnlocked[locker] && !guestTapUnlock[locker]) {
-        unsigned long timeSinceUnlock = millis() - lockerUnlockTime[locker];
-        if (timeSinceUnlock > 20000) {
-          Serial.println("\n⚠️  TIMEOUT: " + LOCKER_NAMES[locker] + " unlocked for 20s - FORCE LOCKING");
-          autoLockLocker(locker);
-        }
-      }
     }
     
     // ========== PERIODIC DEBUG OUTPUT (Every 3 seconds) ==========
@@ -583,10 +555,15 @@ void irSensorTask(void * parameter) {
       Serial.println("\n🔍 IR SENSOR STATUS (Smoothed Values):");
       for (int locker = 0; locker < 4; locker++) {
         Serial.print("  " + LOCKER_NAMES[locker] + ": [");
-        Serial.print(String((int)irSmoothed[locker][0]));
-        Serial.print(", ");
-        Serial.print(String((int)irSmoothed[locker][1]));
-        Serial.print("] | State: " + String(lastLockerOccupied[locker] ? "OCCUPIED" : "EMPTY") + " | Confirm: " + String(lockerStateConfirm[locker]));
+        if (locker < 2) {
+          Serial.print("N/A, N/A");
+          Serial.print("] | State: N/A | Confirm: 0");
+        } else {
+          Serial.print(String((int)irSmoothed[locker][0]));
+          Serial.print(", ");
+          Serial.print(String((int)irSmoothed[locker][1]));
+          Serial.print("] | State: " + String(lastLockerOccupied[locker] ? "OCCUPIED" : "EMPTY") + " | Confirm: " + String(lockerStateConfirm[locker]));
+        }
         Serial.println();
       }
       lastDebugPrint = millis();
@@ -615,7 +592,7 @@ void sendIRStatusToBackend(int lockerIndex, bool occupied) {
   Serial.println("   📤 Reporting IR status to backend...");
   
   HTTPClient http;
-  if (!beginBackendRequest(http, BACKEND_IR_URL, 5000)) {
+  if (!beginBackendRequest(http, BACKEND_IR_URL, 1000)) {
     Serial.println("   ✗ Failed to begin HTTP connection for IR status");
     http.end();
     yield();
@@ -681,7 +658,7 @@ void readAndProcessRFID() {
   // If the same guest card taps again while its locker is in guest tap-mode, lock it locally
   if (uid == lastUnlockedGuestUID && lastUnlockedGuestLockerIndex >= 0 && guestTapUnlock[lastUnlockedGuestLockerIndex]) {
     Serial.println("   🔐 Guest RFID tap detected for currently unlocked locker. Locking locker " + String(lastUnlockedGuestLockerIndex + 1) + "...");
-    autoLockLocker(lastUnlockedGuestLockerIndex);
+    lockLockerRelay(lastUnlockedGuestLockerIndex);
     showSuccess("LOCKER " + String(lastUnlockedGuestLockerIndex + 1) + " LOCKED");
     lastScannedUID = uid;
     lastRfidRead = millis();
@@ -756,7 +733,7 @@ void sendCardToBackend(String uid) {
   Serial.println("   Payload: " + payload);
 
   String response;
-  int httpCode = postJsonPayload(BACKEND_RFID_URL, payload, response, 5000);
+  int httpCode = postJsonPayload(BACKEND_RFID_URL, payload, response, 2000);
 
   if (httpCode >= 200 && httpCode < 300) {
     Serial.println("   ✓ Response: " + response);
@@ -800,7 +777,7 @@ bool checkScanPermission() {
   }
 
   HTTPClient http;
-  if (!beginBackendRequest(http, BACKEND_SCAN_ENABLED_URL, 2000)) {
+  if (!beginBackendRequest(http, BACKEND_SCAN_ENABLED_URL, 1000)) {
     http.end();
     scanPermissionAllowed = false;
     return false;
@@ -871,8 +848,8 @@ void readAndProcessFingerprint() {
     String uid = String(finger.fingerID);
     Serial.println("🔐 Fingerprint recognized! ID=" + uid);
     sendFingerprintToBackend(uid);
-    // Reduced delay to allow faster subsequent scans
-    delay(500);
+    // Minimal cooldown to prevent duplicate reads without blocking the main loop
+    lastFingerprintPoll = millis() + 300;
   } else if (p == FINGERPRINT_NOTFOUND) {
     Serial.println("  → Fingerprint not in database");
     showError("FP NOT FOUND");
@@ -893,7 +870,7 @@ void sendFingerprintToBackend(String uid) {
   }
 
   HTTPClient http;
-  if (!beginBackendRequest(http, BACKEND_FINGERPRINT_URL, 3000)) {
+  if (!beginBackendRequest(http, BACKEND_FINGERPRINT_URL, 2000)) {
     http.end();
     showError("CONNECTION FAILED");
     return;
@@ -991,9 +968,8 @@ void activateRelay(int relayIndex) {
   
   Serial.println("   🔓 Activating relay " + String(relayIndex + 1) + " (GPIO " + String(pin) + ")");
   
-  // Mark this locker as unlocked for smart auto-lock
+  // Mark this locker as unlocked for valid close/lock actions
   lockerUnlocked[relayIndex] = true;
-  lockerUnlockTime[relayIndex] = millis();
   
   // Unlock by toggling to active state
   if (inverted) {
@@ -1001,13 +977,10 @@ void activateRelay(int relayIndex) {
   } else {
     digitalWrite(pin, LOW);   // Normal: LOW = unlocked
   }
-  
-  // DON'T BLOCK THE MAIN LOOP - let auto-lock happen asynchronously via IR sensor
-  // The IR sensor task on Core 1 will detect when door closes and auto-lock
 }
 
-// ========== Smart Auto-Lock (triggered by IR detection) ==========
-void autoLockLocker(int relayIndex) {
+// ========== Locker lock helper for valid lock actions ==========
+void lockLockerRelay(int relayIndex) {
   if (relayIndex < 0 || relayIndex > 3 || !lockerUnlocked[relayIndex]) {
     return;
   }
@@ -1015,7 +988,7 @@ void autoLockLocker(int relayIndex) {
   int pin = relayPins[relayIndex];
   bool inverted = relayInverted[relayIndex];
   
-  Serial.println("   🔒 Auto-locking relay " + String(relayIndex + 1));
+  Serial.println("   🔒 Locking relay " + String(relayIndex + 1));
   
   // Lock by toggling back to locked state
   if (inverted) {
@@ -1026,7 +999,6 @@ void autoLockLocker(int relayIndex) {
   
   // Clear unlock flags for this locker
   lockerUnlocked[relayIndex] = false;
-  lockerUnlockTime[relayIndex] = 0;
   
   // Clear guest tap-to-toggle state when the locker gets locked
   if (lastUnlockedGuestLockerIndex == relayIndex) {
@@ -1108,7 +1080,7 @@ void handleLockerEndpoint() {
   }
 
   if (action == "lock") {
-    // Directly control relay (bypass autoLockLocker safety checks)
+    // Manual lock command
     int pin = relayPins[relayIndex];
     bool inverted = relayInverted[relayIndex];
     
@@ -1123,7 +1095,6 @@ void handleLockerEndpoint() {
     
     // Clear unlock state
     lockerUnlocked[relayIndex] = false;
-    lockerUnlockTime[relayIndex] = 0;
     guestTapUnlock[relayIndex] = false;
     lastScannedUID = "";
     

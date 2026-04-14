@@ -134,8 +134,12 @@
         <span>Available</span>
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
-        <div style="width:20px; height:20px; border-radius:50%; background:#fee2e2; display:flex; align-items:center; justify-content:center; color:#991b1b; font-weight:700;">✗</div>
-        <span>Occupied</span>
+        <div style="width:20px; height:20px; border-radius:50%; background:#fef3c7; display:flex; align-items:center; justify-content:center; color:#92400e; font-weight:700;">⏳</div>
+        <span>Reserved</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:20px; height:20px; border-radius:50%; background:#e2e8f0; display:flex; align-items:center; justify-content:center; color:#334155; font-weight:700;">★</div>
+        <span>Guest-only</span>
       </div>
     </div>
 
@@ -143,7 +147,7 @@
       {% for l in lockers %}
         <form method="post" action="/user/select-locker" style="margin:0;">
           <input type="hidden" name="locker_id" value="{{ l['id'] }}" />
-          {% if l['status'] == 'available' and not l['assignment_status'] %}
+          {% if l['locker_type'] == 'member' and not l['assignment_status'] %}
             <button type="submit" class="als-card als-card--member available" style="background:#fff; border: none; padding: 0;">
               <div class="locker-status-badge available">✓</div>
               <div class="als-card-icon">
@@ -173,12 +177,10 @@
               <div>
                 <div class="als-card-label" style="color:#9aabb8;">{{ l["label"] }}</div>
                 <div class="als-card-sub" style="color:#bcc5d0;">
-                  {% if l['assignment_status'] == 'member_assigned' %}
-                    Reserved
-                  {% elif l['assignment_status'] == 'guest_assigned' %}
-                    Guest Access
+                  {% if l['locker_type'] == 'guest' %}
+                    Guest-only
                   {% else %}
-                    Occupied
+                    Reserved
                   {% endif %}
                 </div>
               </div>

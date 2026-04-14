@@ -220,7 +220,7 @@
                   <div class="locker-info-row">
                     <span class="locker-label">Locker contents</span>
                     <span class="locker-value">
-                      {% if locker.status == 'occupied' %}
+                      {% if locker.type == 'guest' and locker.status == 'occupied' %}
                         Occupied
                       {% else %}
                         Empty
@@ -247,15 +247,25 @@
                     {% endif %}
                   </div>
                 {% else %}
+                  <div class="locker-info-row">
+                    <span class="locker-label">Locker type</span>
+                    <span class="locker-value">{% if locker.type == 'member' %}Member-only{% else %}Guest-only{% endif %}</span>
+                  </div>
                   <div class="text-center py-4">
-                    {% if locker.status == 'occupied' %}
-                      <div class="mb-3"><i class="fas fa-archive fa-3x text-warning"></i></div>
-                      <h6 class="text-warning fw-bold mb-2">Contents Detected</h6>
-                      <p class="text-muted small mb-3">IR sensor indicates locker is not empty</p>
+                    {% if locker.type == 'guest' %}
+                      {% if locker.status == 'occupied' %}
+                        <div class="mb-3"><i class="fas fa-archive fa-3x text-warning"></i></div>
+                        <h6 class="text-warning fw-bold mb-2">Contents Detected</h6>
+                        <p class="text-muted small mb-3">IR sensor indicates locker is not empty</p>
+                      {% else %}
+                        <div class="mb-3"><i class="fas fa-box-open fa-3x text-success"></i></div>
+                        <h6 class="text-success fw-bold mb-2">Available</h6>
+                        <p class="text-muted small mb-3">Ready for assignment</p>
+                      {% endif %}
                     {% else %}
-                      <div class="mb-3"><i class="fas fa-box-open fa-3x text-success"></i></div>
-                      <h6 class="text-success fw-bold mb-2">Available</h6>
-                      <p class="text-muted small mb-3">Ready for assignment</p>
+                      <div class="mb-3"><i class="fas fa-slash fa-3x text-secondary"></i></div>
+                      <h6 class="text-secondary fw-bold mb-2">Not monitored</h6>
+                      <p class="text-muted small mb-3">Member lockers are not monitored by IR sensors</p>
                     {% endif %}
                   </div>
                 {% endif %}

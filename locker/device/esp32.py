@@ -35,18 +35,19 @@ class LockerState:
 
 
 class ESP32DeviceController:
-    def __init__(self, base_url: str | None = None, timeout: float = 10.0, retries: int = 2):
+    def __init__(self, base_url: str | None = None, timeout: float = 2.0, retries: int = 1):
         self.base_url = base_url or os.getenv("ESP32_BASE_URL", "http://192.168.4.1")
         self.timeout = timeout
-        self.connect_timeout = float(os.getenv("ESP32_CONNECT_TIMEOUT", 3.0))
+        self.connect_timeout = float(os.getenv("ESP32_CONNECT_TIMEOUT", 1.0))
         self.retries = int(os.getenv("ESP32_MAX_RETRIES", retries))
         self.session = requests.Session()
+        self.session.trust_env = False
 
         retry_strategy = Retry(
             total=self.retries,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=["GET", "POST"],
-            backoff_factor=0.5,
+            backoff_factor=0,
             raise_on_status=False,
         )
         adapter = HTTPAdapter(max_retries=retry_strategy)
