@@ -30,12 +30,13 @@ const int IR_SENSOR_PINS[4][2] = {
 
 const char* WIFI_SSID = "Emelon Wifi";
 const char* WIFI_PASSWORD = "emelonwifi123";
-const char* BACKEND_RFID_URL = "http://192.168.2.103:5000/device/rfid";
-const char* BACKEND_IR_URL = "http://192.168.2.103:5000/device/ir-status";
-const char* BACKEND_FINGERPRINT_URL = "http://192.168.2.103:5000/device/fingerprint";
-const char* BACKEND_FINGERPRINT_ENROLL_URL = "http://192.168.2.103:5000/device/fingerprint/enroll";
-const char* BACKEND_FINGERPRINT_START_ENROLL_URL = "http://192.168.2.103:5000/device/fingerprint/start-enrollment";
-const char* BACKEND_SCAN_ENABLED_URL = "http://192.168.2.103:5000/api/access/scan-enabled";
+const char* BACKEND_HOST = "http://192.168.2.102:5000";
+const char* BACKEND_RFID_URL = "http://192.168.2.102:5000/device/rfid";
+const char* BACKEND_IR_URL = "http://192.168.2.102:5000/device/ir-status";
+const char* BACKEND_FINGERPRINT_URL = "http://192.168.2.102:5000/device/fingerprint";
+const char* BACKEND_FINGERPRINT_ENROLL_URL = "http://192.168.2.102:5000/device/fingerprint/enroll";
+const char* BACKEND_FINGERPRINT_START_ENROLL_URL = "http://192.168.2.102:5000/device/fingerprint/start-enrollment";
+const char* BACKEND_SCAN_ENABLED_URL = "http://192.168.2.102:5000/api/access/scan-enabled";
 const unsigned long FINGERPRINT_POLL_INTERVAL = 100; // Poll fingerprint sensor every 100ms (faster response)
 const int FINGERPRINT_RX_PIN = 16;
 const int FINGERPRINT_TX_PIN = 17;
@@ -1141,6 +1142,37 @@ void setupWebServer() {
     serializeJson(doc, response);
     sendJsonResponse(200, response);
   });
+
+  webServer.on("/fingerprint/start-enrollment", HTTP_POST, []() {
+    Serial.println("📩 Direct backend enroll command received via POST");
+    if (!enrollmentMode) {
+      startFingerprintEnrollment();
+      sendJsonResponse(200, "{\"status\":\"enrollment_started\"}");
+      return;
+    }
+    sendJsonResponse(200, "{\"status\":\"already_active\"}");
+  });
+
+  webServer.on("/fingerprint/start-enrollment", HTTP_GET, []() {
+    Serial.println("📩 Direct backend enroll command received via GET");
+    if (!enrollmentMode) {
+      startFingerprintEnrollment();
+      sendJsonResponse(200, "{\"status\":\"enrollment_started\"}");
+      return;
+    }
+    sendJsonResponse(200, "{\"status\":\"already_active\"}");
+  });
+
+  webServer.on("/fingerprint/stop-enrollment", HTTP_POST, []() {
+    Serial.println("📩 Direct backend stop-enrollment command received");
+    if (enrollmentMode) {
+      stopFingerprintEnrollment();
+      sendJsonResponse(200, "{\"status\":\"enrollment_stopped\"}");
+      return;
+    }
+    sendJsonResponse(200, "{\"status\":\"already_inactive\"}");
+  });
+
   webServer.onNotFound(handleLockerEndpoint);
   webServer.begin();
   Serial.println("🌐 ESP32 HTTP server started on port 80");
@@ -1389,14 +1421,17 @@ void checkForEnrollmentCommand() {
   http.setTimeout(3000);
 
   if (!http.begin(BACKEND_FINGERPRINT_START_ENROLL_URL)) {
+    Serial.println("✗ Failed to begin enrollment polling to backend URL: " + String(BACKEND_FINGERPRINT_START_ENROLL_URL));
     http.end();
     return;
   }
 
   int httpCode = http.POST("{}");
+  Serial.println("   Enrollment poll HTTP code: " + String(httpCode));
 
   if (httpCode == 200) {
     String response = http.getString();
+    Serial.println("   Enrollment poll response: " + response);
 
     StaticJsonDocument<128> doc;
     DeserializationError error = deserializeJson(doc, response);
@@ -1404,11 +1439,19 @@ void checkForEnrollmentCommand() {
       const char* status = doc["status"];
 
       if (status && strcmp(status, "enrollment_started") == 0 && !enrollmentMode) {
+        Serial.println("   Backend requested enrollment mode start");
         startFingerprintEnrollment();
       } else if (status && strcmp(status, "enrollment_stopped") == 0 && enrollmentMode) {
+        Serial.println("   Backend requested enrollment mode stop");
         stopFingerprintEnrollment();
+      } else {
+        Serial.println("   Enrollment poll no_action or unknown status: " + String(status ? status : "<none>"));
       }
+    } else {
+      Serial.println("   Failed to parse enrollment poll JSON response");
     }
+  } else {
+    Serial.println("   Enrollment poll HTTP failure code: " + String(httpCode));
   }
 
   http.end();

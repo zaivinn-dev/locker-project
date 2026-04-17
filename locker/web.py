@@ -499,13 +499,26 @@ def create_app() -> Flask:
         fingerprint_enrollment_state["active"] = False
         print("Frontend requested enrollment - flag set to True")
         print(f"Current enrollment state: pending={fingerprint_enrollment_state['pending']}, enrolled_uid={fingerprint_enrollment_state['enrolled_uid']}")
+
+        try:
+            device = get_device()
+            if hasattr(device, "start_fingerprint_enrollment"):
+                response = device.start_fingerprint_enrollment()
+                print(f"ESP32 direct start enrollment response: {response}")
+                if isinstance(response, dict) and response.get("status") == "enrollment_started":
+                    fingerprint_enrollment_state["pending"] = False
+                    fingerprint_enrollment_state["active"] = True
+                    print("ESP32 direct enrollment command accepted and active=True")
+        except Exception as exc:
+            print(f"[ESP32] direct start enrollment failed: {type(exc).__name__}: {exc}")
+
         return {"status": "pending"}
 
-    @app.post("/device/fingerprint/start-enrollment")
+    @app.route("/device/fingerprint/start-enrollment", methods=["GET", "POST"])
     def device_fingerprint_start_enrollment():
         """Check if enrollment should be started (polled by ESP32)."""
         data = request.get_json(silent=True) or {}
-        action = data.get("action", "check")
+        action = request.values.get("action", data.get("action", "check"))
         
         if action == "stop":
             # ESP32 is stopping enrollment
@@ -1546,7 +1559,7 @@ def main() -> None:
     app = create_app()
     # Listen on 0.0.0.0 to allow ESP32 hardware to connect from network
     # Disable the Flask reloader so shared enrollment state remains consistent.
-    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=True)
+    app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":

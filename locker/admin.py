@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 import flask
+import hmac
 import requests
 from flask import Blueprint, make_response, redirect, render_template, request, session, url_for
 import json
@@ -59,6 +60,10 @@ DEFAULT_SETTINGS = {
     "payment_gateway": "none",
 }
 
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+MASTER_UNLOCK_CONFIRM_TEXT = os.getenv("MASTER_UNLOCK_CONFIRM_TEXT", "UNLOCK ALL")
+
 def load_settings():
     """Load settings from JSON file or return defaults."""
     if os.path.exists(SETTINGS_FILE):
@@ -110,13 +115,16 @@ def admin_login():
     return render_template("admin/auth/login.html")
 
 
+def verify_admin_credentials(username: str, password: str) -> bool:
+    return hmac.compare_digest(username, ADMIN_USERNAME) and hmac.compare_digest(password, ADMIN_PASSWORD)
+
+
 @admin_bp.post("/login")
 def admin_login_submit():
     username = (request.form.get("username") or "").strip()
     password = (request.form.get("password") or "").strip()
 
-    # Starter hard-coded admin account. Later you can move this to a DB table.
-    if username == "admin" and password == "admin123":
+    if verify_admin_credentials(username, password):
         session["admin_logged_in"] = True
         session["admin_username"] = username
         session["admin_id"] = 1
@@ -133,6 +141,54 @@ def admin_login_submit():
 def admin_logout():
     session.clear()
     return redirect(url_for("admin.admin_login"))
+
+
+@admin_bp.post("/unlock-all")
+def admin_unlock_all():
+    guard = _require_admin()
+    if guard is not None:
+        flask.flash("Action denied: Not logged in as admin", "danger")
+        return guard
+
+    confirm_text = (request.form.get("confirm_text") or "").strip()
+    admin_password = (request.form.get("admin_password") or "").strip()
+
+    if confirm_text != MASTER_UNLOCK_CONFIRM_TEXT:
+        flask.flash(f"Unlock cancelled: type '{MASTER_UNLOCK_CONFIRM_TEXT}' to confirm.", "danger")
+        return redirect(url_for("admin.admin_dashboard"))
+
+    if not verify_admin_credentials(session.get("admin_username", ""), admin_password):
+        flask.flash("Unlock cancelled: invalid admin password.", "danger")
+        return redirect(url_for("admin.admin_dashboard"))
+
+    device_controller = get_device_controller()
+    locker_ids = [1, 2, 3, 4]
+    results = []
+    errors = []
+
+    for locker_id in locker_ids:
+        try:
+            device_controller.unlock(int(locker_id))
+            results.append(locker_id)
+        except requests.exceptions.RequestException as exc:
+            errors.append(f"Locker {locker_id}: {str(exc)}")
+        except Exception as exc:
+            errors.append(f"Locker {locker_id}: {str(exc)}")
+
+    with connect() as conn:
+        detail = f"locker_ids={','.join(str(i) for i in locker_ids)}; result={ 'success' if not errors else 'partial_failure' }; details={';'.join(errors) if errors else 'all_unlocked'}"
+        conn.execute(
+            "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+            ("admin", session.get("admin_username", "unknown"), "master_unlock_all", detail),
+        )
+        conn.commit()
+
+    if errors:
+        flask.flash(f"Master unlock completed with errors: {'; '.join(errors)}", "warning")
+    else:
+        flask.flash("All lockers have been unlocked successfully.", "success")
+
+    return redirect(url_for("admin.admin_dashboard"))
 
 
 @admin_bp.get("/reset-data")
@@ -356,6 +412,7 @@ def admin_dashboard():
         totals={**totals, "monthly_revenue": monthly_revenue},
         member_status_counts=member_status_counts,
         activity_7d=activity_7d,
+        master_unlock_text=MASTER_UNLOCK_CONFIRM_TEXT,
     )
 
 
@@ -938,6 +995,7 @@ def admin_lockers():
             """,
         )
 
+    with connect() as conn:
         # Get all lockers with their assigned member/guest info
         # Only show APPROVED members (status='approved') or active guests (not expired)
         # This prevents pending members from showing as "assigned" to a locker
@@ -1367,7 +1425,17 @@ def admin_create_guest():
             ).fetchone()
             if not locker:
                 return {"error": "Locker not found"}, 404
-        
+
+        # Guard against invalid admin IDs when this app stores admins separately from members.
+        admin_id = session.get("admin_id")
+        if admin_id is not None:
+            valid_admin = conn.execute(
+                "SELECT id FROM members WHERE id = ?",
+                (admin_id,),
+            ).fetchone()
+            if not valid_admin:
+                admin_id = None
+
         # Create guest (instant access, paid automatically based on category)
         expiry_date = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
         cur = conn.execute(
@@ -1396,7 +1464,7 @@ def admin_create_guest():
                     now.strftime("%Y-%m-%d %H:%M:%S"),
                     expires_at,
                     expected_return_time,
-                    session.get("admin_id", 1),
+                    admin_id,
                     "Guest created with RFID card",
                     locker_id,
                 ),
@@ -1539,6 +1607,7 @@ def admin_settings():
         now=datetime.now(),
         admin_users=admin_users,
         current_admin_id=session.get("admin_id", 1),
+        master_unlock_text=MASTER_UNLOCK_CONFIRM_TEXT,
     )
 
 

@@ -51,19 +51,16 @@ class DBConnection:
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if exc_type is not None:
-            if self._is_postgres:
+        try:
+            if exc_type is not None:
                 self._conn.rollback()
-            return False
-        if self._is_postgres:
+                return False
             self._conn.commit()
-        else:
-            self._conn.commit()
-        self._cursor.close()
-        if self._is_postgres:
-            self._conn.close()
-        else:
-            self._conn.close()
+        finally:
+            if self._cursor is not None:
+                self._cursor.close()
+            if self._conn is not None:
+                self._conn.close()
         return False
 
     def _translate_sql(self, sql: str, params: Optional[Iterable[Any]] = None) -> str:
@@ -108,8 +105,10 @@ class DBConnection:
         self._conn.commit()
 
     def close(self):
-        self._cursor.close()
-        self._conn.close()
+        if self._cursor is not None:
+            self._cursor.close()
+        if self._conn is not None:
+            self._conn.close()
 
 
 def connect() -> DBConnection:
@@ -120,7 +119,15 @@ def connect() -> DBConnection:
         conn = psycopg2.connect(database_url)
         return DBConnection(conn, is_postgres=True)
 
-    sqlite_conn = sqlite3.connect(_db_path())
+    sqlite_conn = sqlite3.connect(
+        _db_path(),
+        timeout=60,
+        check_same_thread=False,
+    )
+    sqlite_conn.execute("PRAGMA journal_mode=WAL;")
+    sqlite_conn.execute("PRAGMA synchronous = NORMAL;")
+    sqlite_conn.execute("PRAGMA foreign_keys = ON;")
+    sqlite_conn.execute("PRAGMA busy_timeout = 60000;")
     return DBConnection(sqlite_conn, is_postgres=False)
 
 
