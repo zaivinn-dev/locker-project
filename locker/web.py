@@ -82,6 +82,7 @@ fingerprint_enrollment_state = {
 # Runtime access status shared between the fingerprint scanner and the browser access page
 access_status_state = {
     "state": "waiting",
+    "denial_reason": None,
     "locker_id": None,
     "member_id": None,
     "member_name": None,
@@ -343,8 +344,13 @@ def create_app() -> Flask:
 
         print(f"[FINGERPRINT ACCESS] Received fingerprint UID: {uid}")
 
-        # Find member by fingerprint (must be approved and paid)
-        member_row = _find_member_by_fingerprint(uid)
+        # Find ANY member with this fingerprint (not just approved/paid)
+        with connect() as conn:
+            member_row = conn.execute(
+                "SELECT * FROM members WHERE fingerprint_uid = ? AND member_type = 'regular'",
+                (uid,),
+            ).fetchone()
+        
         member = dict(member_row) if member_row else None
         
         if not member:
@@ -363,21 +369,61 @@ def create_app() -> Flask:
                     )
                     return {"status": "denied", "reason": "fingerprint_reserved_for_guests"}, 403
             
-            # Fingerprint not found in system
+            # Fingerprint not found in system at all
             with connect() as conn:
                 conn.execute(
                     "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                    ("fingerprint", uid, "access_denied", "unrecognized_fingerprint_or_not_registered"),
+                    ("fingerprint", uid, "access_denied", "unrecognized_fingerprint"),
                 )
-            print(f"[FINGERPRINT ACCESS] Fingerprint UID {uid} NOT FOUND or not registered for member access")
+            print(f"[FINGERPRINT ACCESS] Fingerprint UID {uid} NOT FOUND in system")
             # Store access status for polling in shared server state
             access_status_state["state"] = "denied"
+            access_status_state["denial_reason"] = "unrecognized"
             access_status_state["locker_id"] = None
             access_status_state["member_id"] = None
             access_status_state["member_name"] = None
-            access_status_state["message"] = "Fingerprint not registered for member access"
+            access_status_state["message"] = "Your fingerprint is not recognized"
             access_status_state["updated_at"] = datetime.now(timezone.utc)
-            return {"status": "denied"}, 403
+            return {"status": "denied", "reason": "unrecognized_fingerprint"}, 403
+
+        # Fingerprint exists - check if member is approved and paid
+        if member["status"] != "approved" or member["payment_status"] != "paid":
+            with connect() as conn:
+                conn.execute(
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("member", str(member["id"]), "access_denied", f"fingerprint_registered_but_not_active; status={member['status']}; payment={member['payment_status']}"),
+                )
+            print(f"[FINGERPRINT ACCESS] ✗ Member {member['full_name']} (ID={member['id']}) found but not active: status={member['status']}, payment={member['payment_status']}")
+            access_status_state["state"] = "denied"
+            access_status_state["denial_reason"] = "inactive"
+            access_status_state["locker_id"] = None
+            access_status_state["member_id"] = member["id"]
+            access_status_state["member_name"] = member["full_name"]
+            access_status_state["message"] = "Access Denied"
+            access_status_state["updated_at"] = datetime.now(timezone.utc)
+            return {"status": "denied", "reason": "member_inactive"}, 403
+
+        # Check if membership has expired
+        if member.get("expiry_date"):
+            try:
+                expiry_datetime = datetime.fromisoformat(member["expiry_date"])
+                if datetime.now() > expiry_datetime:
+                    with connect() as conn:
+                        conn.execute(
+                            "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                            ("member", str(member["id"]), "access_denied", f"membership_expired; expiry={member['expiry_date']}"),
+                        )
+                    print(f"[FINGERPRINT ACCESS] ✗ Member {member['full_name']} (ID={member['id']}) membership expired: {member['expiry_date']}")
+                    access_status_state["state"] = "denied"
+                    access_status_state["denial_reason"] = "expired"
+                    access_status_state["locker_id"] = None
+                    access_status_state["member_id"] = member["id"]
+                    access_status_state["member_name"] = member["full_name"]
+                    access_status_state["message"] = "Access Denied"
+                    access_status_state["updated_at"] = datetime.now(timezone.utc)
+                    return {"status": "denied", "reason": "membership_expired"}, 403
+            except (ValueError, TypeError) as e:
+                print(f"[FINGERPRINT ACCESS] Warning: Invalid expiry_date format for member {member['id']}: {member['expiry_date']} - {e}")
 
         locker_id = member["locker_id"]
         if not locker_id:
@@ -418,7 +464,7 @@ def create_app() -> Flask:
         access_status_state["locker_id"] = locker_id
         access_status_state["member_id"] = member["id"]
         access_status_state["member_name"] = member["full_name"]
-        access_status_state["message"] = f"Welcome {member['full_name']}. Locker {locker_id} unlocked."
+        access_status_state["message"] = "Access Granted"
         access_status_state["updated_at"] = datetime.now(timezone.utc)
         return {"status": "unlocked", "locker_id": locker_id}
 
@@ -588,6 +634,7 @@ def create_app() -> Flask:
             if age_seconds < 30:
                 return {
                     "state": access_status_state.get("state", "waiting"),
+                    "denial_reason": access_status_state.get("denial_reason"),
                     "locker_id": access_status_state.get("locker_id"),
                     "member_id": access_status_state.get("member_id"),
                     "member_name": access_status_state.get("member_name"),
@@ -596,12 +643,13 @@ def create_app() -> Flask:
 
         # Clear stale status after 30 seconds.
         access_status_state["state"] = "waiting"
+        access_status_state["denial_reason"] = None
         access_status_state["locker_id"] = None
         access_status_state["member_id"] = None
         access_status_state["member_name"] = None
         access_status_state["message"] = "Awaiting fingerprint scan"
         access_status_state["updated_at"] = None
-        return {"state": "waiting", "locker_id": None, "member_id": None, "member_name": None, "message": "Awaiting fingerprint scan"}
+        return {"state": "waiting", "denial_reason": None, "locker_id": None, "member_id": None, "member_name": None, "message": "Awaiting fingerprint scan"}
 
     @app.post("/api/access/enable-scan")
     def api_enable_scan():
@@ -621,6 +669,7 @@ def create_app() -> Flask:
     def api_clear_locker_state():
         """Clear locker access state when user returns to home page."""
         access_status_state["state"] = "waiting"
+        access_status_state["denial_reason"] = None
         access_status_state["locker_id"] = None
         access_status_state["member_id"] = None
         access_status_state["member_name"] = None
