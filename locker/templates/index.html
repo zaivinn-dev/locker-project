@@ -54,5 +54,246 @@
   </div>
 </main>
 
+<!-- Hidden lock modal -->
+<div id="lock-modal" class="modal" style="display:none;">
+  <div class="modal-content modal-content--small">
+    <h2>Admin Lock</h2>
+    <p>Enter admin password to lock the system.</p>
+    <input id="lock-password" type="password" autocomplete="current-password" placeholder="Admin password" style="width:100%; padding:12px 14px; margin:1rem 0; border:1px solid #cbd5e1; border-radius:10px;" />
+    <div id="lock-feedback" style="min-height:1.2rem; color:#dc2626; font-size:0.95rem;"></div>
+    <div style="display:flex; justify-content:space-between; gap:10px; margin-top:1rem;">
+      <button id="lock-submit-btn" type="button" class="btn-primary" style="flex:1;">Lock System</button>
+      <button id="lock-cancel-btn" type="button" class="btn-secondary" style="flex:1;">Cancel</button>
+    </div>
+    <p style="margin:1rem 0 0; font-size:0.85rem; color:#94a3b8;">Hidden trigger: Ctrl+Shift+L, long press the logo, or tap the nav area quickly.</p>
+  </div>
+</div>
+
+<style>
+  .als-card--disabled {
+    opacity: 0.45;
+    pointer-events: none;
+    filter: grayscale(0.3);
+  }
+  .modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.55);
+  }
+  .modal-content--small {
+    width: min(420px, calc(100% - 32px));
+    border-radius: 18px;
+    background: #ffffff;
+    padding: 1.8rem;
+    box-shadow: 0 20px 60px rgba(15, 23, 42, 0.18);
+  }
+</style>
+
+<script>
+(function() {
+  let locked = {{ 'true' if system_locked else 'false' }};
+  const lockModal = document.getElementById('lock-modal');
+  const lockPassword = document.getElementById('lock-password');
+  const lockSubmitBtn = document.getElementById('lock-submit-btn');
+  const lockCancelBtn = document.getElementById('lock-cancel-btn');
+  const lockFeedback = document.getElementById('lock-feedback');
+  const registerCard = document.querySelector('a.als-card--register');
+  const memberCard = document.querySelector('a.als-card--member');
+  const triggerArea = document.querySelector('.als-nav');
+
+  if (!registerCard || !memberCard) {
+    console.warn('Index page card links are missing.');
+    return;
+  }
+
+  function setCardState() {
+    const hrefMap = {
+      register: '/user/register',
+      member: '/user/access',
+    };
+
+    if (locked) {
+      registerCard.classList.add('als-card--disabled');
+      registerCard.removeAttribute('href');
+      registerCard.setAttribute('aria-disabled', 'true');
+
+      memberCard.classList.add('als-card--disabled');
+      memberCard.removeAttribute('href');
+      memberCard.setAttribute('aria-disabled', 'true');
+    } else {
+      registerCard.classList.remove('als-card--disabled');
+      registerCard.setAttribute('href', hrefMap.register);
+      registerCard.removeAttribute('aria-disabled');
+
+      memberCard.classList.remove('als-card--disabled');
+      memberCard.setAttribute('href', hrefMap.member);
+      memberCard.removeAttribute('aria-disabled');
+    }
+  }
+
+  function getLockEndpoint() {
+    return locked ? '/api/system-unlock' : '/api/system-lock';
+  }
+
+  function updateModalState() {
+    if (!lockModal || !lockSubmitBtn || !lockPassword) {
+      return;
+    }
+    const isUnlock = locked;
+    lockSubmitBtn.textContent = isUnlock ? 'Unlock System' : 'Lock System';
+    const message = isUnlock
+      ? 'Enter admin password to unlock the system.'
+      : 'Enter admin password to lock the system.';
+    lockModal.querySelector('p').textContent = message;
+    lockPassword.placeholder = isUnlock ? 'Admin password to unlock' : 'Admin password';
+  }
+
+  function openLockModal() {
+    if (!lockModal || !lockPassword) {
+      return;
+    }
+    updateModalState();
+    lockFeedback.textContent = '';
+    lockPassword.value = '';
+    lockModal.style.display = 'flex';
+    lockPassword.focus();
+  }
+
+  function closeLockModal() {
+    if (!lockModal) {
+      return;
+    }
+    lockModal.style.display = 'none';
+    lockFeedback.textContent = '';
+  }
+
+  function setModalError(message) {
+    if (!lockFeedback) {
+      return;
+    }
+    lockFeedback.textContent = message;
+  }
+
+  async function submitLock() {
+    if (!lockPassword || !lockSubmitBtn || !lockCancelBtn) {
+      return;
+    }
+
+    const password = lockPassword.value.trim();
+    if (!password) {
+      setModalError('Please enter the admin password.');
+      return;
+    }
+
+    lockSubmitBtn.disabled = true;
+    lockCancelBtn.disabled = true;
+    setModalError('');
+
+    try {
+      const response = await fetch(getLockEndpoint(), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setModalError(data.message || data.error || 'Invalid password.');
+        return;
+      }
+
+      if (data.status === 'locked') {
+        locked = true;
+        setCardState();
+        closeLockModal();
+      } else if (data.status === 'unlocked') {
+        locked = false;
+        setCardState();
+        closeLockModal();
+      } else {
+        setModalError(data.message || 'Unexpected server response.');
+      }
+    } catch (err) {
+      setModalError('Unable to contact server.');
+    } finally {
+      lockSubmitBtn.disabled = false;
+      lockCancelBtn.disabled = false;
+    }
+  }
+
+  if (lockSubmitBtn) {
+    lockSubmitBtn.addEventListener('click', submitLock);
+  }
+  if (lockCancelBtn) {
+    lockCancelBtn.addEventListener('click', closeLockModal);
+  }
+  if (lockModal) {
+    lockModal.addEventListener('click', function(event) {
+      if (event.target === lockModal) {
+        closeLockModal();
+      }
+    });
+  }
+
+  registerCard.addEventListener('click', function(event) {
+    if (locked) {
+      event.preventDefault();
+      return;
+    }
+    if (this.href) {
+      window.location.href = this.href;
+    }
+  });
+
+  memberCard.addEventListener('click', function(event) {
+    if (locked) {
+      event.preventDefault();
+      return;
+    }
+    if (this.href) {
+      window.location.href = this.href;
+    }
+  });
+
+  let clickCount = 0;
+  let clickTimeout;
+  let longPressTimeout;
+
+  if (triggerArea) {
+    triggerArea.addEventListener('click', function() {
+      clickCount += 1;
+      clearTimeout(clickTimeout);
+      clickTimeout = setTimeout(() => { clickCount = 0; }, 2500);
+      if (clickCount >= 5) {
+        clickCount = 0;
+        openLockModal();
+      }
+    });
+
+    triggerArea.addEventListener('mousedown', function() {
+      longPressTimeout = setTimeout(openLockModal, 1500);
+    });
+
+    triggerArea.addEventListener('mouseup', function() {
+      clearTimeout(longPressTimeout);
+    });
+  }
+
+  document.addEventListener('keydown', function(event) {
+    if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'l') {
+      event.preventDefault();
+      openLockModal();
+    }
+  });
+
+  setCardState();
+})();
+</script>
+
 {% endblock %}
 

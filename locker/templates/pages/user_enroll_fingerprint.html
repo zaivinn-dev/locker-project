@@ -459,16 +459,12 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = await response.json().catch(() => ({}));
       const message = data.message || data.error || 'Failed to start enrollment. Please try again.';
       
-      if (response.ok && data.status === 'pending') {
+      if (response.ok && (data.status === 'pending' || data.status === 'waiting')) {
         // Hide start button and show status
         startEnrollmentSection.style.display = 'none';
         statusDiv.style.display = 'block';
-        
-        // Update status to show activation
-        statusIcon.textContent = '🔄';
-        statusText.textContent = 'Activating fingerprint scanner...';
-        statusDetail.textContent = 'Please wait while we connect to the device.';
-        statusText.style.color = '#0f6e56';
+        resetStatusPanel();
+        setEnrollmentStatus(data.message || 'Activating fingerprint scanner...', 'Please wait while we connect to the device.', '🔄', '#0f6e56');
         
         // Start polling for enrollment status
         startPolling();
@@ -500,9 +496,48 @@ document.addEventListener('DOMContentLoaded', function() {
     btnText.textContent = '🔐 Start Fingerprint Enrollment';
     btnLoading.style.display = 'none';
     btnHint.textContent = 'Click to activate the fingerprint scanner';
+    statusIcon.textContent = '⚠️';
+    statusText.textContent = 'Enrollment error occurred';
+    statusText.style.color = '#d32f2f';
+    statusDetail.textContent = message;
     showErrorModal(message);
   }
   
+  function setEnrollmentStatus(message, detail, icon, color) {
+    statusIcon.textContent = icon;
+    statusText.textContent = message;
+    statusText.style.color = color || '#0f6e56';
+    statusDetail.textContent = detail || '';
+  }
+
+  function setScanProgress(step) {
+    const scanProgress = document.getElementById('scan-progress');
+    if (step === 1) {
+      scanProgress.innerHTML = `
+        <div style="width: 16px; height: 16px; border-radius: 50%; background: #0f6e56; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 700;">✓</div>
+        <div style="width: 16px; height: 16px; border-radius: 50%; background: #ccd5de; display: flex; align-items: center; justify-content: center; color: #7a8fa6; font-size: 10px; font-weight: 700;">2</div>
+      `;
+    } else if (step === 2) {
+      scanProgress.innerHTML = `
+        <div style="width: 16px; height: 16px; border-radius: 50%; background: #0f6e56; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 700;">✓</div>
+        <div style="width: 16px; height: 16px; border-radius: 50%; background: #0f6e56; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 700;">✓</div>
+      `;
+    } else {
+      scanProgress.innerHTML = `
+        <div style="width: 16px; height: 16px; border-radius: 50%; background: #0f6e56; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 700;">1</div>
+        <div style="width: 16px; height: 16px; border-radius: 50%; background: #ccd5de; display: flex; align-items: center; justify-content: center; color: #7a8fa6; font-size: 10px; font-weight: 700;">2</div>
+      `;
+    }
+  }
+
+  function resetStatusPanel() {
+    statusIcon.textContent = '⏳';
+    statusText.textContent = 'Waiting for first fingerprint scan...';
+    statusText.style.color = '#0f6e56';
+    statusDetail.textContent = 'Place your finger on the scanner';
+    setScanProgress(0);
+  }
+
   // Cancel enrollment button click handler
   cancelEnrollmentBtn.addEventListener('click', async function() {
     try {
@@ -538,116 +573,64 @@ document.addEventListener('DOMContentLoaded', function() {
     let pollCount = 0;
     let firstScanDetected = false;
     
-    // Poll for enrolled fingerprint every 500ms for better responsiveness
     pollInterval = setInterval(async () => {
       try {
         pollCount++;
         const response = await fetch('/api/enrollment-status');
         const data = await response.json();
-        
-        // Check for enrollment errors
+
         if (data.error) {
           clearInterval(pollInterval);
+          setEnrollmentStatus('Fingerprint not recognized', data.message || 'Please try again.', '⚠️', '#d32f2f');
           showErrorModal(data.error);
-          // Re-enable start button after error
-          setTimeout(() => {
-            startEnrollmentSection.style.display = 'block';
-            statusDiv.style.display = 'none';
-            startEnrollmentBtn.disabled = false;
-            btnText.textContent = '🔐 Start Fingerprint Enrollment';
-            btnLoading.style.display = 'none';
-            btnHint.textContent = 'Click to activate the fingerprint scanner';
-          }, 3000);
-          return;
-        }
-        
-        if (data.enrolled) {
-          // Fingerprint enrolled successfully (all scans complete)
-          statusIcon.textContent = '✅';
-          statusText.textContent = 'Fingerprint enrolled successfully!';
-          statusText.style.color = '#0f6e56';
-          statusDetail.textContent = 'All scans completed. You can now finish your registration.';
-          
-          // Update scan progress to show both complete
-          const scanProgress = document.getElementById('scan-progress');
-          scanProgress.innerHTML = `
-            <div style="width: 16px; height: 16px; border-radius: 50%; background: #0f6e56; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 700;">✓</div>
-            <div style="width: 16px; height: 16px; border-radius: 50%; background: #0f6e56; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 700;">✓</div>
-          `;
-          
-          completeBtn.disabled = false;
-          completeBtn.textContent = '✓ Complete Enrollment';
-          clearInterval(pollInterval);
-        } else if (data.step === 1 && !firstScanDetected) {
-          // First scan completed
-          firstScanDetected = true;
-          const scanProgress = document.getElementById('scan-progress');
-          scanProgress.innerHTML = `
-            <div style="width: 16px; height: 16px; border-radius: 50%; background: #0f6e56; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; font-weight: 700;">✓</div>
-            <div style="width: 16px; height: 16px; border-radius: 50%; background: #ccd5de; display: flex; align-items: center; justify-content: center; color: #7a8fa6; font-size: 10px; font-weight: 700;">2</div>
-          `;
-          statusIcon.textContent = '👍';
-          statusText.textContent = 'First scan recorded!';
-          statusText.style.color = '#0f6e56';
-          statusDetail.textContent = 'Place your finger again for the second scan';
-        } else if (pollCount > 240) { // 2 minutes timeout
-          // Enrollment timeout
-          statusIcon.textContent = '⏰';
-          statusText.textContent = 'Enrollment timeout';
-          statusText.style.color = '#d32f2f';
-          statusDetail.textContent = 'Please try again or contact support.';
-          
-          // Re-enable start button
           startEnrollmentSection.style.display = 'block';
           statusDiv.style.display = 'none';
           startEnrollmentBtn.disabled = false;
           btnText.textContent = '🔐 Start Fingerprint Enrollment';
           btnLoading.style.display = 'none';
           btnHint.textContent = 'Click to activate the fingerprint scanner';
-          clearInterval(pollInterval);
-        } else {
-          // Update status based on poll count and step
-          if (data.step === 0) {
-            if (pollCount === 1) {
-              statusIcon.textContent = '🔄';
-              statusText.textContent = 'Connecting to fingerprint scanner...';
-              statusDetail.textContent = 'This may take a few seconds';
-            } else if (pollCount <= 6) {
-              statusIcon.textContent = '⏳';
-              statusText.textContent = 'Waiting for scanner activation...';
-              statusDetail.textContent = 'Please stand by';
-            } else if (pollCount <= 120) { // First 60 seconds
-              statusIcon.textContent = '👆';
-              statusText.textContent = 'Scanner ready - place your finger';
-              statusDetail.textContent = 'This is the first scan';
-            } else {
-              statusIcon.textContent = '👆';
-              statusText.textContent = 'Still waiting for first scan...';
-              statusDetail.textContent = 'Place your finger on the scanner';
-            }
-          } else if (data.step === 1 && firstScanDetected) {
-            statusIcon.textContent = '👆';
-            statusText.textContent = 'Place your finger for second scan';
-            statusDetail.textContent = 'Keep your finger in the same position';
-          }
+          return;
         }
+
+        if (data.status === 'enrolled' || data.enrolled) {
+          setEnrollmentStatus('Enrollment successful', data.message || 'Fingerprint enrolled successfully.', '✅', '#0f6e56');
+          setScanProgress(2);
+          completeBtn.disabled = false;
+          completeBtn.textContent = '✓ Complete Enrollment';
+          clearInterval(pollInterval);
+          return;
+        }
+
+        if (data.status === 'first_scan' || data.step === 1) {
+          if (!firstScanDetected) {
+            firstScanDetected = true;
+            setScanProgress(1);
+          }
+          setEnrollmentStatus('First scan successful', 'Remove your finger and place it again for the second scan.', '👍', '#0f6e56');
+          return;
+        }
+
+        if (data.status === 'waiting' || data.step === 0) {
+          if (pollCount <= 6) {
+            setEnrollmentStatus(data.message || 'Place your finger on the scanner', 'This is the first scan.', '👆', '#0f6e56');
+          } else if (pollCount <= 14) {
+            setEnrollmentStatus('Still waiting for fingerprint', 'Try repositioning your finger and try again.', '👆', '#d97706');
+          } else {
+            setEnrollmentStatus('Fingerprint not recognized, please retry', 'Wipe your finger and try again.', '⚠️', '#d32f2f');
+          }
+          return;
+        }
+
+        setEnrollmentStatus(data.message || 'Waiting for fingerprint scan', 'Follow the instructions on the screen.', '⏳', '#0f6e56');
       } catch (error) {
-        console.log('Polling for enrollment status...');
-        statusIcon.textContent = '⚠️';
-        statusText.textContent = 'Connection issue detected';
-        statusDetail.textContent = 'Checking device status...';
+        console.log('Polling for enrollment status...', error);
+        setEnrollmentStatus('Connection issue detected', 'Retrying shortly...', '⚠️', '#d32f2f');
       }
-    }, 500); // Poll every 500ms for better responsiveness
+    }, 500);
     
-    // Stop polling after 2 minutes
-    setTimeout(() => {
+    timeoutHandle = setTimeout(() => {
       clearInterval(pollInterval);
-      statusIcon.textContent = '⏰';
-      statusText.textContent = 'Enrollment timeout';
-      statusText.style.color = '#d32f2f';
-      statusDetail.textContent = 'Please try again or contact support.';
-      
-      // Re-enable start button
+      setEnrollmentStatus('Enrollment timeout', 'Please try again or contact support.', '⏰', '#d32f2f');
       startEnrollmentSection.style.display = 'block';
       statusDiv.style.display = 'none';
       startEnrollmentBtn.disabled = false;

@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 import flask
 import hmac
 import requests
-from flask import Blueprint, make_response, redirect, render_template, request, session, url_for
+from flask import Blueprint, jsonify, make_response, redirect, render_template, request, session, url_for
 import json
 import os
 
@@ -23,6 +23,14 @@ fingerprint_enrollment_state = {
 }
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
+
+
+def json_error(error: str, message: str, status_code: int = 400):
+    return make_response(jsonify({"error": error, "message": message}), status_code)
+
+
+def json_success(payload: dict, status_code: int = 200):
+    return make_response(jsonify(payload), status_code)
 
 # Settings file path
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
@@ -92,6 +100,48 @@ def _require_admin():
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.admin_login"))
     return None
+
+
+def _load_locker_statuses():
+    """Load locker assignments and current physical lock state."""
+    lockers = []
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT l.id, l.label, l.status, m.id AS member_id, m.full_name, m.member_type
+            FROM lockers l
+            LEFT JOIN members m ON l.id = m.locker_id
+            ORDER BY l.id ASC
+            """
+        ).fetchall()
+
+    for row in rows:
+        locker = {
+            "id": row["id"],
+            "label": row["label"],
+            "db_status": row["status"],
+            "assigned_to": None,
+            "locked": None,
+            "item_detected": None,
+            "device_error": None,
+        }
+        if row["member_id"]:
+            locker["assigned_to"] = {
+                "id": row["member_id"],
+                "name": row["full_name"],
+                "member_type": row["member_type"],
+            }
+        try:
+            state = device.get_locker(row["id"])
+            locker["locked"] = state.locked
+            locker["item_detected"] = state.item_detected
+        except requests.exceptions.RequestException as exc:
+            locker["device_error"] = str(exc)
+        except Exception as exc:
+            locker["device_error"] = str(exc)
+        lockers.append(locker)
+
+    return lockers
 
 
 # Protect all admin routes except login
@@ -337,9 +387,7 @@ def admin_dashboard():
                 "SELECT COUNT(*) AS c FROM members WHERE member_type = 'regular' AND status = 'approved' AND payment_status = 'paid'"
             ).fetchone()["c"],
             "guests_total": conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest'").fetchone()["c"],
-            "guests_active": conn.execute(
-                "SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest' AND (expiry_date IS NULL OR expiry_date >= datetime('now', 'localtime'))"
-            ).fetchone()["c"],
+            "guests_active": conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest'").fetchone()["c"],
             "lockers_total": conn.execute("SELECT COUNT(*) AS c FROM lockers").fetchone()["c"],
             "lockers_available": conn.execute("SELECT COUNT(*) AS c FROM lockers WHERE status = 'available'").fetchone()["c"],
             "lockers_occupied": conn.execute("SELECT COUNT(*) AS c FROM lockers WHERE status = 'occupied'").fetchone()["c"],
@@ -781,11 +829,9 @@ def admin_rfid():
         return guard
 
     q = request.args.get("q", "").strip()
-    status_filter = request.args.get("status", "all")  # all|active|expired
+    status_filter = request.args.get("status", "all")  # all|active|inactive
     sort_by = request.args.get("sort", "created_at")  # created_at|total_payments|name
     sort_order = request.args.get("order", "desc")  # asc|desc
-
-    now_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     with connect() as conn:
         base_query = """
@@ -794,7 +840,6 @@ def admin_rfid():
             m.full_name,
             m.rfid_uid,
             m.locker_id,
-            m.expiry_date,
             CASE
                 WHEN LOWER(TRIM(m.category)) = 'student' THEN 'student'
                 ELSE 'regular'
@@ -808,17 +853,7 @@ def admin_rfid():
                FROM guest_rfid_cards grc
                WHERE grc.guest_id = m.id
                ORDER BY grc.issue_time DESC
-               LIMIT 1) AS card_status,
-            (SELECT grc.expires_at
-               FROM guest_rfid_cards grc
-               WHERE grc.guest_id = m.id
-               ORDER BY grc.issue_time DESC
-               LIMIT 1) AS card_expires_at,
-            (SELECT grc.expected_return_time
-               FROM guest_rfid_cards grc
-               WHERE grc.guest_id = m.id
-               ORDER BY grc.issue_time DESC
-               LIMIT 1) AS card_expected_return_time
+               LIMIT 1) AS card_status
         FROM members m
         LEFT JOIN access_logs al ON al.actor_type = 'guest' AND al.actor_ref = m.rfid_uid
         WHERE m.member_type = 'guest'
@@ -832,21 +867,19 @@ def admin_rfid():
             params.extend([search_param, search_param, search_param, search_param])
 
         if status_filter == "active":
-            base_query += " AND (m.expiry_date IS NULL OR REPLACE(m.expiry_date, 'T', ' ') >= ?)"
-            params.append(now_local)
-        elif status_filter == "expired":
-            base_query += " AND REPLACE(m.expiry_date, 'T', ' ') < ?"
-            params.append(now_local)
+            base_query += " AND EXISTS ("
+            base_query += "SELECT 1 FROM guest_rfid_cards grc "
+            base_query += "WHERE grc.guest_id = m.id "
+            base_query += "  AND grc.issue_time = (SELECT MAX(issue_time) FROM guest_rfid_cards grc2 WHERE grc2.guest_id = m.id) "
+            base_query += "  AND grc.status = 'ACTIVE')"
+        elif status_filter == "inactive":
+            base_query += " AND EXISTS ("
+            base_query += "SELECT 1 FROM guest_rfid_cards grc "
+            base_query += "WHERE grc.guest_id = m.id "
+            base_query += "  AND grc.issue_time = (SELECT MAX(issue_time) FROM guest_rfid_cards grc2 WHERE grc2.guest_id = m.id) "
+            base_query += "  AND grc.status != 'ACTIVE')"
 
-        base_query += " AND NOT EXISTS (\n"
-        base_query += "            SELECT 1 FROM guest_rfid_cards grc\n"
-        base_query += "            WHERE grc.guest_id = m.id\n"
-        base_query += "              AND grc.issue_time = (\n"
-        base_query += "                  SELECT MAX(issue_time) FROM guest_rfid_cards grc2 WHERE grc2.guest_id = m.id\n"
-        base_query += "              )\n"
-        base_query += "              AND grc.status IN ('RETURNED', 'BLACKLISTED', 'LOST')\n"
-        base_query += "        )"
-        base_query += " GROUP BY m.id, m.full_name, m.rfid_uid, m.locker_id, m.expiry_date, m.category, m.created_at"
+        base_query += " GROUP BY m.id, m.full_name, m.rfid_uid, m.locker_id, m.category, m.created_at"
 
         sort_column_map = {
             "created_at": "m.created_at",
@@ -874,13 +907,11 @@ def admin_rfid():
                         SELECT MAX(issue_time) FROM guest_rfid_cards grc2 WHERE grc2.guest_id = m.id
                     )
                     AND grc.status = 'ACTIVE'
-                    AND grc.expires_at >= ?
               )
-            """,
-            (now_local,),
+            """
         ).fetchone()["c"]
 
-        expired_count = conn.execute(
+        inactive_count = conn.execute(
             """
             SELECT COUNT(*) AS c
             FROM members m
@@ -891,13 +922,9 @@ def admin_rfid():
                     AND grc.issue_time = (
                         SELECT MAX(issue_time) FROM guest_rfid_cards grc2 WHERE grc2.guest_id = m.id
                     )
-                    AND (
-                        grc.status = 'EXPIRED'
-                        OR (grc.status = 'ACTIVE' AND grc.expires_at < ?)
-                    )
+                    AND grc.status != 'ACTIVE'
               )
-            """,
-            (now_local,),
+            """
         ).fetchone()["c"]
 
         total_revenue = conn.execute(
@@ -914,18 +941,6 @@ def admin_rfid():
         ).fetchone()["c"]
 
     guests = [dict(g) for g in guests]
-    def is_card_active(guest):
-        if guest.get('card_status') != 'ACTIVE':
-            return False
-        if guest.get('card_expires_at'):
-            return guest['card_expires_at'] >= now_local
-        return True
-
-    card_active_count = sum(1 for guest in guests if guest.get('card_status') == 'ACTIVE')
-    card_expired_count = sum(1 for guest in guests if guest.get('card_status') == 'EXPIRED' or (guest.get('card_status') == 'ACTIVE' and guest.get('card_expires_at') and guest['card_expires_at'] < now_local))
-    card_returned_count = sum(1 for guest in guests if guest.get('card_status') == 'RETURNED')
-    card_blacklisted_count = sum(1 for guest in guests if guest.get('card_status') == 'BLACKLISTED')
-    card_lost_count = sum(1 for guest in guests if guest.get('card_status') == 'LOST')
 
     return render_template(
         "admin/pages/admin_rfid.html",
@@ -938,12 +953,7 @@ def admin_rfid():
         sort_by=sort_by,
         sort_order=sort_order,
         active_count=active_count,
-        expired_count=expired_count,
-        card_active_count=card_active_count,
-        card_expired_count=card_expired_count,
-        card_returned_count=card_returned_count,
-        card_blacklisted_count=card_blacklisted_count,
-        card_lost_count=card_lost_count,
+        inactive_count=inactive_count,
         total_revenue=total_revenue,
         total_access_events=total_access_events,
         now=datetime.now(),
@@ -959,20 +969,8 @@ def admin_lockers():
     
     now_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with connect() as conn:
-        # NOTE: Expired guest records are now retained so expired RFID cards remain visible
-        # in the admin audit pages and can still be marked as returned or lost.
-        # Synchronize locker assignment state before rendering the lockers grid.
-        # Clear expired guest locker assignments and release any orphaned occupied locks.
-        conn.execute(
-            """
-            UPDATE members
-               SET locker_id = NULL
-             WHERE member_type = 'guest'
-               AND locker_id IS NOT NULL
-               AND REPLACE(expiry_date, 'T', ' ') < ?
-            """,
-            (now_local,),
-        )
+        # NOTE: Guest locker assignments are retained even when guest access no longer expires.
+        # Only release a locker when the guest no longer has an active card record.
         conn.execute(
             """
             UPDATE members
@@ -1014,12 +1012,11 @@ def admin_lockers():
             FROM lockers l
             LEFT JOIN members m ON l.id = m.locker_id 
                 AND (
-                    (m.member_type != 'guest' AND m.status = 'approved')  -- Only show APPROVED regular members
-                    OR (m.member_type = 'guest' AND (m.expiry_date IS NULL OR REPLACE(m.expiry_date, 'T', ' ') >= ?))  -- Show active guests, including no-expiry guests
+                    (m.member_type != 'guest' AND m.status = 'approved')
+                    OR (m.member_type = 'guest')
                 )
             ORDER BY l.id ASC
-            """,
-            (now_local,)
+            """
         ).fetchall()
         
         # Transform to list of dicts for template
@@ -1078,17 +1075,6 @@ def admin_get_available_lockers():
 
     now_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with connect() as conn:
-        # Clean up expired guest locker assignments so available-lockers stays in sync.
-        conn.execute(
-            """
-            UPDATE members
-               SET locker_id = NULL
-             WHERE member_type = 'guest'
-               AND locker_id IS NOT NULL
-               AND REPLACE(expiry_date, 'T', ' ') < ?
-            """,
-            (now_local,),
-        )
         conn.execute(
             """
             UPDATE lockers
@@ -1248,12 +1234,16 @@ def admin_export_guests():
             m.address,
             m.rfid_uid,
             m.locker_id,
-            m.expiry_date,
             m.created_at,
             COALESCE(SUM(p.amount), 0) as total_payments,
             COUNT(p.id) as payment_count,
             COUNT(al.id) as total_access_events,
-            MAX(al.created_at) as last_access_time
+            MAX(al.created_at) as last_access_time,
+            (SELECT grc.status
+               FROM guest_rfid_cards grc
+               WHERE grc.guest_id = m.id
+               ORDER BY grc.issue_time DESC
+               LIMIT 1) AS latest_card_status
         FROM members m
         LEFT JOIN payments p ON m.id = p.member_id
         LEFT JOIN access_logs al ON al.actor_type = 'guest' AND al.actor_ref = m.rfid_uid
@@ -1268,11 +1258,9 @@ def admin_export_guests():
             params.extend([search_param, search_param, search_param])
 
         if status_filter == "active":
-            base_query += " AND (m.expiry_date IS NULL OR REPLACE(m.expiry_date, 'T', ' ') >= ?)"
-            params.append(now_local)
-        elif status_filter == "expired":
-            base_query += " AND REPLACE(m.expiry_date, 'T', ' ') < ?"
-            params.append(now_local)
+            base_query += " AND (SELECT grc.status FROM guest_rfid_cards grc WHERE grc.guest_id = m.id ORDER BY grc.issue_time DESC LIMIT 1) = 'ACTIVE'"
+        elif status_filter == "inactive":
+            base_query += " AND (SELECT grc.status FROM guest_rfid_cards grc WHERE grc.guest_id = m.id ORDER BY grc.issue_time DESC LIMIT 1) != 'ACTIVE'"
 
         base_query += " GROUP BY m.id ORDER BY m.created_at DESC"
 
@@ -1286,12 +1274,12 @@ def admin_export_guests():
     writer.writerow([
         'Guest ID', 'Name', 'Contact', 'Address', 'RFID Card', 'Locker',
         'Status', 'Total Payments', 'Payment Count', 'Access Events',
-        'Created Date', 'Last Access', 'Expiry Date'
+        'Created Date', 'Last Access'
     ])
 
     # Write data
     for guest in guests:
-        status = "Active" if (not guest['expiry_date'] or guest['expiry_date'].replace('T', ' ') >= now_local) else "Expired"
+        status = guest['latest_card_status'] or 'UNKNOWN'
         writer.writerow([
             guest['id'],
             guest['full_name'],
@@ -1305,7 +1293,6 @@ def admin_export_guests():
             guest['total_access_events'],
             guest['created_at'][:19] if guest['created_at'] else '',
             guest['last_access_time'][:19] if guest['last_access_time'] else '',
-            guest['expiry_date'][:19] if guest['expiry_date'] else ''
         ])
 
     # Return CSV file
@@ -1314,26 +1301,6 @@ def admin_export_guests():
     response.headers["Content-Disposition"] = "attachment; filename=guest_list.csv"
     response.headers["Content-type"] = "text/csv"
     return response
-    """Get list of available lockers for guest assignment (lockers 1-4 only)."""
-    guard = _require_admin()
-    if guard is not None:
-        return {"error": "Unauthorized"}, 401
-    
-    with connect() as conn:
-        # Get lockers that are not assigned to any guest
-        lockers = conn.execute(
-            """
-            SELECT l.id, l.label 
-            FROM lockers l 
-            LEFT JOIN members m ON l.id = m.locker_id AND m.member_type = 'guest'
-            WHERE m.id IS NULL
-            ORDER BY l.id
-            """
-        ).fetchall()
-    
-    return {
-        "lockers": [{"id": l["id"], "label": l["label"]} for l in lockers]
-    }
 
 
 @admin_bp.post("/guests/create")
@@ -1341,168 +1308,176 @@ def admin_create_guest():
     """Create a guest with RFID card."""
     guard = _require_admin()
     if guard is not None:
-        return guard
+        return json_error("unauthorized", "Admin login required.", 401)
     
     full_name = (request.form.get("full_name") or "").strip()
     rfid_uid = (request.form.get("rfid_uid") or "").strip() or None
     locker_id_raw = (request.form.get("locker_id") or "").strip()
+    locker_id = None
+    if locker_id_raw:
+        try:
+            locker_id = int(locker_id_raw)
+        except ValueError:
+            return json_error("invalid_locker_id", "Assigned locker must be a valid locker number.", 400)
+
     category = (request.form.get("category") or "regular").strip().lower() or "regular"
     payment_amount = 35 if category == "student" else 40
-    duration_hours = 24
-    
+
     if not full_name:
-        return {"error": "Full name is required"}, 400
-    
-    locker_id = int(locker_id_raw) if locker_id_raw.isdigit() else None
-    duration_hours = 24
-    
-    with connect() as conn:
-        existing = None
-        if rfid_uid:
-            # Check for duplicate RFID - but allow if previous guest's access has expired or been returned.
-            existing = conn.execute(
-                "SELECT id, member_type, expiry_date FROM members WHERE rfid_uid = ?",
-                (rfid_uid,),
-            ).fetchone()
-            
-            if existing and existing["member_type"] == "guest":
-                # Check the current card state for this RFID.
-                card_state = conn.execute(
-                    "SELECT status FROM guest_rfid_cards WHERE rfid_uid = ? ORDER BY issue_time DESC LIMIT 1",
+        return json_error("missing_full_name", "Guest name is required.", 400)
+
+    try:
+        with connect() as conn:
+            existing = None
+            if rfid_uid:
+                # Check for duplicate RFID - but allow if previous guest's access has expired or been returned.
+                existing = conn.execute(
+                    "SELECT id, member_type, expiry_date FROM members WHERE rfid_uid = ?",
                     (rfid_uid,),
                 ).fetchone()
-                card_status = card_state["status"] if card_state else None
+                
+                if existing and existing["member_type"] == "guest":
+                    # Check the current card state for this RFID.
+                    card_state = conn.execute(
+                        "SELECT status FROM guest_rfid_cards WHERE rfid_uid = ? ORDER BY issue_time DESC LIMIT 1",
+                        (rfid_uid,),
+                    ).fetchone()
+                    card_status = card_state["status"] if card_state else None
 
-                if card_status == "ACTIVE":
-                    return {"error": "RFID card is currently in use"}, 409
-                if card_status in ("BLACKLISTED", "LOST"):
-                    return {"error": "RFID card is blacklisted", "status": card_status}, 409
+                    if card_status == "ACTIVE":
+                        return json_error("rfid_in_use", "RFID card is currently in use.", 409)
+                    if card_status in ("BLACKLISTED", "LOST"):
+                        return json_error("rfid_blacklisted", "RFID card is blacklisted.", 409)
 
-                if card_status not in ("EXPIRED", "RETURNED"):
-                    # Fallback to expiry date when the card record is not present.
-                    if existing["expiry_date"]:
-                        expiry = datetime.fromisoformat(existing["expiry_date"])
-                        if datetime.now() < expiry:
-                            return {"error": "RFID card is currently in use"}, 409
-                    else:
-                        return {"error": "RFID card is currently in use"}, 409
+                    if card_status not in ("EXPIRED", "RETURNED"):
+                        # Fallback to expiry date when the card record is not present.
+                        if existing["expiry_date"]:
+                            expiry = datetime.fromisoformat(existing["expiry_date"])
+                            if datetime.now() < expiry:
+                                return json_error("rfid_in_use", "RFID card is currently in use.", 409)
+                        else:
+                            return json_error("rfid_in_use", "RFID card is currently in use.", 409)
 
-                # Preserve the old guest record for history, but clear its active RFID and locker mapping.
-                old_locker_id = conn.execute(
-                    "SELECT locker_id FROM members WHERE id = ?",
-                    (existing["id"],),
-                ).fetchone()
-                if old_locker_id and old_locker_id["locker_id"]:
+                    # Preserve the old guest record for history, but clear its active RFID and locker mapping.
+                    old_locker_id = conn.execute(
+                        "SELECT locker_id FROM members WHERE id = ?",
+                        (existing["id"],),
+                    ).fetchone()
+                    if old_locker_id and old_locker_id["locker_id"]:
+                        conn.execute(
+                            "UPDATE lockers SET status = 'available' WHERE id = ?",
+                            (old_locker_id["locker_id"],),
+                        )
+                        conn.execute(
+                            "UPDATE members SET locker_id = NULL WHERE id = ?",
+                            (existing["id"],),
+                        )
                     conn.execute(
-                        "UPDATE lockers SET status = 'available' WHERE id = ?",
-                        (old_locker_id["locker_id"],),
-                    )
-                    conn.execute(
-                        "UPDATE members SET locker_id = NULL WHERE id = ?",
+                        "UPDATE members SET rfid_uid = NULL WHERE id = ?",
                         (existing["id"],),
                     )
-                conn.execute(
-                    "UPDATE members SET rfid_uid = NULL WHERE id = ?",
-                    (existing["id"],),
-                )
-            elif existing and existing["member_type"] != "guest":
-                # Don't allow reusing member RFIDs
-                return {"error": "RFID card already in use by a member"}, 409
-        
-        # Check for role conflict: prevent creating guest if person already has fingerprint as member
-        role_conflict = conn.execute(
-            "SELECT id, member_type FROM members WHERE full_name = ? AND fingerprint_uid IS NOT NULL",
-            (full_name,),
-        ).fetchone()
-        if role_conflict:
-            return {"error": "Person already registered as member with fingerprint - cannot create as guest"}, 409
-        
-        # Check locker availability if locker assigned
-        if locker_id:
-            locker = conn.execute(
-                "SELECT status FROM lockers WHERE id = ?",
-                (locker_id,),
+                elif existing and existing["member_type"] != "guest":
+                    # Don't allow reusing member RFIDs
+                    return json_error("rfid_in_use", "RFID card already in use by a member.", 409)
+
+            # Check for role conflict: prevent creating guest if person already has fingerprint as member
+            role_conflict = conn.execute(
+                "SELECT id, member_type FROM members WHERE full_name = ? AND fingerprint_uid IS NOT NULL",
+                (full_name,),
             ).fetchone()
-            if not locker:
-                return {"error": "Locker not found"}, 404
+            if role_conflict:
+                return json_error("role_conflict", "Person already registered as member with fingerprint - cannot create as guest.", 409)
 
-        # Guard against invalid admin IDs when this app stores admins separately from members.
-        admin_id = session.get("admin_id")
-        if admin_id is not None:
-            valid_admin = conn.execute(
-                "SELECT id FROM members WHERE id = ?",
-                (admin_id,),
-            ).fetchone()
-            if not valid_admin:
-                admin_id = None
+            # Check locker availability if locker assigned
+            if locker_id:
+                locker = conn.execute(
+                    "SELECT status FROM lockers WHERE id = ?",
+                    (locker_id,),
+                ).fetchone()
+                if not locker:
+                    return json_error("locker_not_found", "Locker not found.", 404)
 
-        # Create guest (instant access, paid automatically based on category)
-        expiry_date = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-        cur = conn.execute(
-            """
-            INSERT INTO members (full_name, rfid_uid, locker_id, status, payment_status, 
-                                expiry_date, member_type, category, created_at)
-            VALUES (?,?,?,'approved','paid',?,'guest',?,datetime('now'))
-            """,
-            (full_name, rfid_uid, locker_id, expiry_date, category),
-        )
-        guest_id = cur.lastrowid
+            # Guard against invalid admin IDs when this app stores admins separately from members.
+            admin_id = session.get("admin_id")
+            if admin_id is not None:
+                valid_admin = conn.execute(
+                    "SELECT id FROM members WHERE id = ?",
+                    (admin_id,),
+                ).fetchone()
+                if not valid_admin:
+                    admin_id = None
 
-        if rfid_uid:
-            now = datetime.now()
-            expires_at = (now + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
-            expected_return_time = (now + timedelta(hours=25)).strftime("%Y-%m-%d %H:%M:%S")
-            conn.execute(
+            # Create guest (instant access, paid automatically based on category)
+            expiry_date = None
+            cur = conn.execute(
                 """
-                INSERT INTO guest_rfid_cards
-                    (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes, locker_id)
-                VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?)
+                INSERT INTO members (full_name, rfid_uid, locker_id, status, payment_status, 
+                                    expiry_date, member_type, category, created_at)
+                VALUES (?,?,?,'approved','paid',?,'guest',?,datetime('now'))
                 """,
-                (
-                    guest_id,
-                    rfid_uid,
-                    now.strftime("%Y-%m-%d %H:%M:%S"),
-                    expires_at,
-                    expected_return_time,
-                    admin_id,
-                    "Guest created with RFID card",
-                    locker_id,
-                ),
+                (full_name, rfid_uid, locker_id, expiry_date, category),
             )
+            guest_id = cur.lastrowid
+
+            if rfid_uid:
+                now = datetime.now()
+                expires_at = ""
+                expected_return_time = None
+                conn.execute(
+                    """
+                    INSERT INTO guest_rfid_cards
+                        (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, checkout_admin_id, checkout_notes, locker_id)
+                    VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        guest_id,
+                        rfid_uid,
+                        now.strftime("%Y-%m-%d %H:%M:%S"),
+                        expires_at,
+                        expected_return_time,
+                        admin_id,
+                        "Guest created with RFID card",
+                        locker_id,
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("admin", str(guest_id), "card_issued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; locker_id={locker_id or 'N/A'}"),
+                )
+
+            # Update locker status if locker was assigned
+            if locker_id:
+                conn.execute(
+                    "UPDATE lockers SET status = 'occupied' WHERE id = ?",
+                    (locker_id,),
+                )
+            
+            # Note: Locker status is only for IR sensor state (available/occupied)
+            # Assignment is tracked via members.locker_id, not locker status
+            
+            # Log guest creation
             conn.execute(
                 "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                ("admin", str(guest_id), "card_issued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; expires_at={expires_at}; locker_id={locker_id or 'N/A'}"),
+                ("admin", str(guest_id), "guest_created", f"guest_id={guest_id}; rfid={rfid_uid or 'N/A'}; expires={expiry_date or 'N/A'}"),
             )
-
-        # Update locker status if locker was assigned
-        if locker_id:
+            
+            # Record payment
             conn.execute(
-                "UPDATE lockers SET status = 'occupied' WHERE id = ?",
-                (locker_id,),
+                "INSERT INTO payments (member_id, amount, payment_type, notes) VALUES (?, ?, ?, ?)",
+                (guest_id, payment_amount, "guest", f"Guest payment: ₱{payment_amount}"),
             )
-        
-        # Note: Locker status is only for IR sensor state (available/occupied)
-        # Assignment is tracked via members.locker_id, not locker status
-        
-        # Log guest creation
-        conn.execute(
-            "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-            ("admin", str(guest_id), "guest_created", f"guest_id={guest_id}; rfid={rfid_uid or 'N/A'}; expires={expiry_date or 'N/A'}"),
-        )
-        
-        # Record payment
-        conn.execute(
-            "INSERT INTO payments (member_id, amount, payment_type, notes) VALUES (?, ?, ?, ?)",
-            (guest_id, payment_amount, "guest", f"Guest payment: ₱{payment_amount}"),
-        )
-        
-        conn.commit()
-    
-    return {
-        "status": "created",
-        "guest_id": guest_id,
-        "message": f"Guest '{full_name}' recorded with payment ₱{payment_amount}"
-    }, 201
+            
+            conn.commit()
+
+            return json_success({
+                "status": "created",
+                "guest_id": guest_id,
+                "message": f"Guest '{full_name}' recorded with payment ₱{payment_amount}"
+            }, 201)
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        return json_error("server_error", "Unable to create guest access due to internal error.", 500)
 
 
 @admin_bp.post("/delete-guest/<int:guest_id>")
@@ -1581,6 +1556,66 @@ def admin_lock_locker_1():
     return redirect(url_for("admin.admin_dashboard"))
 
 
+@admin_bp.post("/settings/lockers/<int:locker_id>/<action>")
+def admin_settings_lock_action(locker_id: int, action: str):
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+
+    if action not in ("lock", "unlock"):
+        return json_error("invalid_action", "Invalid locker action.", 400)
+
+    with connect() as conn:
+        locker_row = conn.execute(
+            "SELECT id, label FROM lockers WHERE id = ?",
+            (locker_id,),
+        ).fetchone()
+
+    if not locker_row:
+        return json_error("not_found", "Locker not found.", 404)
+
+    try:
+        if action == "lock":
+            state = device.lock(locker_id)
+        else:
+            state = device.unlock(locker_id)
+    except requests.exceptions.RequestException as exc:
+        return json_error("device_error", f"Failed to {action} locker: {exc}", 503)
+    except Exception as exc:
+        return json_error("device_error", f"Failed to {action} locker: {exc}", 500)
+
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+            (
+                "admin",
+                session.get("admin_username", "unknown"),
+                f"locker_{action}",
+                f"locker_id={locker_id}; action={action}",
+            ),
+        )
+        conn.commit()
+
+    return json_success(
+        {
+            "locker_id": locker_id,
+            "action": action,
+            "locked": state.locked,
+            "item_detected": state.item_detected,
+        }
+    )
+
+
+@admin_bp.get("/settings/lockers/status")
+def admin_settings_locker_statuses():
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+
+    lockers = _load_locker_statuses()
+    return jsonify({"lockers": lockers})
+
+
 @admin_bp.get("/settings")
 def admin_settings():
     """Display system settings page."""
@@ -1598,10 +1633,20 @@ def admin_settings():
             "status": "Active",
         }
     ]
-    
+
+    lockers = []
+    try:
+        lockers = _load_locker_statuses()
+    except Exception as exc:
+        flask.current_app.logger.warning(
+            "Error loading locker status for settings page: %s",
+            exc,
+        )
+
     return render_template(
         "admin/pages/admin_settings.html",
         settings=settings,
+        lockers=lockers,
         current_page="settings",
         admin_username=session.get("admin_username"),
         now=datetime.now(),
@@ -1682,8 +1727,8 @@ def admin_analytics():
     with connect() as conn:
         total_members = conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'regular'").fetchone()["c"]
         total_guests = conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest'").fetchone()["c"]
-        active_guests = conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest' AND (expiry_date IS NULL OR expiry_date >= datetime('now', 'localtime'))").fetchone()["c"]
-        expired_guests = total_guests - active_guests
+        active_guests = total_guests
+        expired_guests = 0
         total_access_logs = conn.execute("SELECT COUNT(*) AS c FROM access_logs WHERE actor_type NOT IN ('system', 'ir_sensor')").fetchone()["c"]
         total_revenue = conn.execute("SELECT COALESCE(SUM(amount), 0) AS total FROM payments").fetchone()["total"]
         

@@ -211,10 +211,10 @@
                       {% endif %}
                     </span>
                   </div>
-                  {% if locker.assigned_to.type == 'guest' and locker.assigned_to.expiry_date %}
+                  {% if locker.assigned_to.type == 'guest' %}
                   <div class="locker-info-row">
-                    <span class="locker-label">Expires</span>
-                    <span class="locker-value">{{ locker.assigned_to.expiry_date.replace('T', ' ')[:16] }}</span>
+                    <span class="locker-label">Status</span>
+                    <span class="locker-value">Assigned</span>
                   </div>
                   {% endif %}
                   <div class="locker-info-row">

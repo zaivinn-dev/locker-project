@@ -199,6 +199,61 @@
     justify-content: flex-start;
   }
 
+  .locker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  .locker-card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 1rem;
+    padding: 1.25rem;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  }
+
+  .locker-card h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.05rem;
+  }
+
+  .locker-card p {
+    margin: 0.5rem 0;
+    color: var(--muted);
+    font-size: 0.93rem;
+  }
+
+  .locker-card .button-row {
+    justify-content: flex-start;
+    margin-top: 1rem;
+  }
+
+  .locker-card .info-badge {
+    margin-right: 0.5rem;
+  }
+
+  .btn-loading {
+    opacity: 0.7;
+    pointer-events: none;
+  }
+
+  .btn-small {
+    padding: 0.75rem 1rem;
+    font-size: 0.88rem;
+  }
+
+  .btn-success {
+    background: #16a34a;
+    color: white;
+    border: 1px solid transparent;
+  }
+
+  .btn-success:hover {
+    background: #15803d;
+  }
+
   .btn-primary,
   .btn-danger,
   .btn-secondary,
@@ -554,6 +609,47 @@
         <section id="locker" class="settings-section">
           <div class="card-block">
             <h2>Locker Controls</h2>
+            <p>Monitor physical locker lock state and take action on individual lockers without losing master unlock support.</p>
+            <div class="locker-grid">
+              {% for locker in lockers %}
+              <div class="locker-card" id="locker-card-{{ locker.id }}">
+                <div class="form-inline" style="justify-content: space-between; gap: 1rem;">
+                  <div>
+                    <h3>{{ locker.label }}</h3>
+                    <p class="form-hint">
+                      {% if locker.assigned_to %}
+                        Assigned to {{ locker.assigned_to.name }} ({{ locker.assigned_to.member_type | capitalize }})
+                      {% else %}
+                        <strong>Available</strong>
+                      {% endif %}
+                    </p>
+                  </div>
+                  <div>
+                    <span id="locker-{{ locker.id }}-state" class="info-badge">
+                      {% if locker.locked is true %}LOCKED{% elif locker.locked is false %}UNLOCKED{% else %}UNKNOWN{% endif %}
+                    </span>
+                  </div>
+                </div>
+                <p class="form-hint">
+                  Locker status: {{ locker.db_status | capitalize }}
+                  {% if locker.item_detected is not none %}
+                    • Item {{ 'detected' if locker.item_detected else 'not detected' }}
+                  {% endif %}
+                </p>
+                {% if locker.device_error %}
+                  <p class="form-hint" style="color: #b91c1c;">Device error: {{ locker.device_error }}</p>
+                {% endif %}
+                <div class="button-row">
+                  <button id="locker-{{ locker.id }}-action-lock" type="button" class="btn btn-secondary btn-small" onclick="setLockerState({{ locker.id }}, 'lock')" {% if locker.locked is true %}disabled{% endif %}>Lock</button>
+                  <button id="locker-{{ locker.id }}-action-unlock" type="button" class="btn btn-primary btn-small" onclick="setLockerState({{ locker.id }}, 'unlock')" {% if locker.locked is false %}disabled{% endif %}>Unlock</button>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+
+          <div class="card-block">
+            <h2>Locker Access Settings</h2>
             <p>Fine tune locker timing, scan behavior, and access timeouts.</p>
             <div class="settings-grid">
               <div class="form-group">
@@ -703,6 +799,46 @@
       return false;
     }
     return confirm('Are you absolutely sure you want to reset all data? This cannot be undone!');
+  }
+
+  async function setLockerState(lockerId, action) {
+    const lockButton = document.getElementById(`locker-${lockerId}-action-lock`);
+    const unlockButton = document.getElementById(`locker-${lockerId}-action-unlock`);
+    const stateBadge = document.getElementById(`locker-${lockerId}-state`);
+
+    if (lockButton) lockButton.classList.add('btn-loading');
+    if (unlockButton) unlockButton.classList.add('btn-loading');
+
+    try {
+      const response = await fetch(`/admin/settings/lockers/${lockerId}/${action}`, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || result.error || 'Unable to perform locker action.');
+      }
+
+      if (stateBadge) {
+        stateBadge.textContent = result.locked ? 'LOCKED' : 'UNLOCKED';
+      }
+      if (lockButton) {
+        lockButton.disabled = result.locked;
+      }
+      if (unlockButton) {
+        unlockButton.disabled = !result.locked;
+      }
+
+      alert(`Locker ${lockerId} ${action}ed successfully.`);
+    } catch (error) {
+      alert(`Failed to ${action} locker ${lockerId}: ${error.message}`);
+    } finally {
+      if (lockButton) lockButton.classList.remove('btn-loading');
+      if (unlockButton) unlockButton.classList.remove('btn-loading');
+    }
   }
 </script>
 {% endblock %}

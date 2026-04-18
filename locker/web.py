@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from flask import Flask, redirect, render_template, request, session, url_for
+from flask import Flask, jsonify, make_response, redirect, render_template, request, session, url_for
 from requests.exceptions import RequestException
 
 import os
@@ -31,12 +31,12 @@ try:
     from .db import connect, init_db
     from .device import get_device_controller
     from .device.background_jobs import start_background_jobs, stop_background_jobs, add_card_fee_to_payment
-    from .admin import admin_bp
+    from .admin import admin_bp, load_settings, verify_admin_credentials, ADMIN_USERNAME
 except ImportError:
     from db import connect, init_db
     from device import get_device_controller
     from device.background_jobs import start_background_jobs, stop_background_jobs, add_card_fee_to_payment
-    from admin import admin_bp
+    from admin import admin_bp, load_settings, verify_admin_credentials, ADMIN_USERNAME
 
 # Global device controller instance - lazy initialized
 device = None
@@ -44,6 +44,14 @@ device = None
 # Locker assignments for separate member/guest access
 MEMBER_LOCKER_IDS = (1, 2)
 GUEST_LOCKER_IDS = (3, 4)
+
+
+def json_error(error: str, message: str, status_code: int = 400):
+    return make_response(jsonify({"error": error, "message": message}), status_code)
+
+
+def json_success(payload: dict, status_code: int = 200):
+    return make_response(jsonify(payload), status_code)
 
 
 def is_member_locker(locker_id: int) -> bool:
@@ -65,6 +73,8 @@ fingerprint_enrollment_state = {
     "pending": False,
     "enrolled_uid": None,
     "step": 0,
+    "status": "waiting",
+    "message": "Waiting for fingerprint enrollment",
     "error": None,
     "active": False,  # New: indicates if enrollment is currently active
 }
@@ -77,6 +87,13 @@ access_status_state = {
     "member_name": None,
     "message": "Awaiting fingerprint scan",
     "updated_at": None,
+}
+
+# Runtime master lock state shared between index page and admin actions
+system_lock_state = {
+    "locked": False,
+    "locked_by": None,
+    "locked_at": None,
 }
 
 # Runtime scan control - fingerprint scanning only enabled when user is actively on member access page
@@ -125,8 +142,6 @@ def create_app() -> Flask:
                    JOIN members m ON grc.guest_id = m.id
                    WHERE grc.rfid_uid = ?
                      AND grc.status = 'ACTIVE'
-                     AND grc.expires_at >= datetime('now', 'localtime')
-                     AND (m.expiry_date IS NULL OR m.expiry_date >= datetime('now', 'localtime'))
                    ORDER BY grc.issue_time DESC
                    LIMIT 1""",
                 (rfid_uid,),
@@ -139,7 +154,7 @@ def create_app() -> Flask:
             
             # Fallback: check old style member-based guest RFID lookup
             member = conn.execute(
-                "SELECT * FROM members WHERE rfid_uid = ? AND member_type = 'guest' AND expiry_date >= datetime('now', 'localtime')",
+                "SELECT * FROM members WHERE rfid_uid = ? AND member_type = 'guest'",
                 (rfid_uid,),
             ).fetchone()
             if member:
@@ -185,18 +200,9 @@ def create_app() -> Flask:
             # If the RFID exists but is not currently active, return a more specific denial reason.
             stale_card = _find_guest_card_by_rfid(uid)
             if stale_card:
-                from datetime import datetime
                 reason = stale_card.get("status", "inactive")
                 if reason == "ACTIVE":
-                    # Active card record exists, but it did not pass the active filters.
-                    try:
-                        expiry_time = datetime.fromisoformat(stale_card["expires_at"])
-                        if datetime.now() > expiry_time:
-                            reason = "card_expired"
-                        else:
-                            reason = "card_inactive"
-                    except (ValueError, TypeError):
-                        reason = "card_invalid"
+                    reason = "card_inactive"
                 elif reason == "EXPIRED":
                     reason = "card_expired"
                 elif reason == "RETURNED":
@@ -249,19 +255,6 @@ def create_app() -> Flask:
                         ("guest", str(guest.get("guest_id", guest.get("id"))), "access_denied", f"card_status={guest['status']}; rfid={uid}"),
                     )
                 return {"status": "denied", "reason": f"card_{reason}"}, 403
-
-            if guest.get("expires_at"):
-                try:
-                    expiry_time = datetime.fromisoformat(guest["expires_at"])
-                    if datetime.now() > expiry_time:
-                        with connect() as conn:
-                            conn.execute(
-                                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                                ("guest", str(guest.get("guest_id", guest.get("id"))), "access_denied", f"card_expired; rfid={uid}; expiry={guest['expires_at']}"),
-                            )
-                        return {"status": "denied", "reason": "card_expired"}, 403
-                except (ValueError, TypeError):
-                    pass
 
             if guest.get("expiry_date"):
                 try:
@@ -442,23 +435,29 @@ def create_app() -> Flask:
         if step == 1:
             # First scan completed
             fingerprint_enrollment_state["step"] = 1
+            fingerprint_enrollment_state["status"] = "first_scan"
+            fingerprint_enrollment_state["message"] = "First scan registered. Remove and place your finger again for step 2."
             fingerprint_enrollment_state["error"] = None
             print(f"First fingerprint scan completed, uid={uid}")
-            return {"status": "first_scan_complete", "fingerprint_uid": uid}
+            return {"status": "first_scan_complete", "fingerprint_uid": uid, "message": fingerprint_enrollment_state["message"]}
         else:
             # Check for duplicate fingerprint before accepting enrollment
             with connect() as conn:
                 existing = conn.execute("SELECT id, full_name FROM members WHERE fingerprint_uid = ?", (uid,)).fetchone()
                 if existing:
-                    fingerprint_enrollment_state["error"] = f"Fingerprint already registered to {existing[1]}."
+                    fingerprint_enrollment_state["status"] = "error"
+                    fingerprint_enrollment_state["message"] = f"Fingerprint already registered to {existing[1]}."
+                    fingerprint_enrollment_state["error"] = fingerprint_enrollment_state["message"]
                     print(f"Duplicate fingerprint detected, uid={uid}, existing user: {existing[1]}")
-                    return {"error": "duplicate_fingerprint"}
+                    return {"error": "duplicate_fingerprint", "message": fingerprint_enrollment_state["message"]}, 409
             
             # Enrollment completed (second scan)
             fingerprint_enrollment_state["enrolled_uid"] = uid
             fingerprint_enrollment_state["pending"] = False
             fingerprint_enrollment_state["active"] = False  # Clear active flag
             fingerprint_enrollment_state["step"] = 2
+            fingerprint_enrollment_state["status"] = "enrolled"
+            fingerprint_enrollment_state["message"] = "Fingerprint enrolled successfully. Complete registration to finish."
             fingerprint_enrollment_state["error"] = None
             print(f"Fingerprint enrolled from device, uid={uid}")
 
@@ -474,6 +473,8 @@ def create_app() -> Flask:
         fingerprint_enrollment_state["pending"] = False
         fingerprint_enrollment_state["enrolled_uid"] = None
         fingerprint_enrollment_state["step"] = 0
+        fingerprint_enrollment_state["status"] = "waiting"
+        fingerprint_enrollment_state["message"] = "Waiting for fingerprint enrollment"
         fingerprint_enrollment_state["error"] = None
         fingerprint_enrollment_state["active"] = False
 
@@ -495,6 +496,8 @@ def create_app() -> Flask:
         fingerprint_enrollment_state["pending"] = True
         fingerprint_enrollment_state["enrolled_uid"] = None
         fingerprint_enrollment_state["step"] = 0
+        fingerprint_enrollment_state["status"] = "waiting"
+        fingerprint_enrollment_state["message"] = "Please place your finger on the scanner."
         fingerprint_enrollment_state["error"] = None
         fingerprint_enrollment_state["active"] = False
         print("Frontend requested enrollment - flag set to True")
@@ -508,11 +511,30 @@ def create_app() -> Flask:
                 if isinstance(response, dict) and response.get("status") == "enrollment_started":
                     fingerprint_enrollment_state["pending"] = False
                     fingerprint_enrollment_state["active"] = True
+                    fingerprint_enrollment_state["status"] = "waiting"
+                    fingerprint_enrollment_state["message"] = "Scanner ready. Place your finger on the scanner."
                     print("ESP32 direct enrollment command accepted and active=True")
+                    return {"status": "pending", "message": fingerprint_enrollment_state["message"]}
+                else:
+                    fingerprint_enrollment_state["pending"] = False
+                    fingerprint_enrollment_state["active"] = False
+                    fingerprint_enrollment_state["status"] = "error"
+                    error_message = response.get("message") if isinstance(response, dict) else "ESP32 failed to start enrollment"
+                    fingerprint_enrollment_state["message"] = error_message
+                    fingerprint_enrollment_state["error"] = error_message
+                    print(f"[ESP32] enrollment start rejected: {error_message}")
+                    return {"status": "error", "error": error_message, "message": error_message}, 500
         except Exception as exc:
-            print(f"[ESP32] direct start enrollment failed: {type(exc).__name__}: {exc}")
+            error_message = f"ESP32 direct start enrollment failed: {type(exc).__name__}: {exc}"
+            print(f"[ESP32] {error_message}")
+            fingerprint_enrollment_state["pending"] = False
+            fingerprint_enrollment_state["active"] = False
+            fingerprint_enrollment_state["status"] = "error"
+            fingerprint_enrollment_state["message"] = error_message
+            fingerprint_enrollment_state["error"] = error_message
+            return {"status": "error", "error": error_message, "message": error_message}, 500
 
-        return {"status": "pending"}
+        return {"status": "pending", "message": fingerprint_enrollment_state["message"]}
 
     @app.route("/device/fingerprint/start-enrollment", methods=["GET", "POST"])
     def device_fingerprint_start_enrollment():
@@ -542,6 +564,8 @@ def create_app() -> Flask:
         """Check if fingerprint has been enrolled during registration."""
         enrolled_uid = fingerprint_enrollment_state.get("enrolled_uid")
         enrollment_step = fingerprint_enrollment_state.get("step", 0)
+        enrollment_status = fingerprint_enrollment_state.get("status", "waiting")
+        enrollment_message = fingerprint_enrollment_state.get("message")
         enrollment_error = fingerprint_enrollment_state.get("error")
         enrollment_active = fingerprint_enrollment_state.get("active", False)
         
@@ -549,6 +573,8 @@ def create_app() -> Flask:
             "enrolled": bool(enrolled_uid), 
             "fingerprint_uid": enrolled_uid,
             "step": enrollment_step,  # 0=waiting, 1=first scan done, 2=enrolled
+            "status": enrollment_status,
+            "message": enrollment_message,
             "error": enrollment_error,
             "active": enrollment_active  # New: indicates if enrollment is currently active
         }
@@ -718,7 +744,103 @@ def create_app() -> Flask:
 
     @app.get("/")
     def index():
-        return render_template("index.html")
+        return render_template(
+            "index.html",
+            system_locked=system_lock_state["locked"],
+            lock_by=system_lock_state["locked_by"],
+            lock_at=system_lock_state["locked_at"],
+        )
+
+    @app.route("/api/system-lock", methods=["POST"])
+    def api_system_lock():
+        data = request.get_json(silent=True) or {}
+        password = (data.get("password") or "").strip()
+        if not password:
+            return {"error": "missing password"}, 400
+
+        admin_username = session.get("admin_username", ADMIN_USERNAME)
+        if not verify_admin_credentials(admin_username, password):
+            return {"error": "invalid credentials"}, 403
+
+        if system_lock_state["locked"]:
+            return {"status": "locked", "message": "System is already locked."}, 200
+
+        locker_ids = list(MEMBER_LOCKER_IDS) + list(GUEST_LOCKER_IDS)
+        lock_errors = []
+
+        for locker_id in locker_ids:
+            try:
+                get_device().lock(int(locker_id))
+            except RequestException as exc:
+                lock_errors.append(f"locker_{locker_id}: {type(exc).__name__}")
+            except Exception as exc:
+                lock_errors.append(f"locker_{locker_id}: {type(exc).__name__} {exc}")
+
+        if lock_errors:
+            return {
+                "status": "error",
+                "error": "device_lock_failure",
+                "message": "Failed to activate system lock on one or more lockers.",
+                "details": lock_errors,
+            }, 503
+
+        system_lock_state["locked"] = True
+        system_lock_state["locked_by"] = admin_username
+        system_lock_state["locked_at"] = datetime.now(timezone.utc).isoformat()
+
+        with connect() as conn:
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                (
+                    "admin",
+                    admin_username,
+                    "system_locked",
+                    f"locked_by={admin_username}; locked_at={system_lock_state['locked_at']}",
+                ),
+            )
+            conn.commit()
+
+        return {
+            "status": "locked",
+            "locked_by": system_lock_state["locked_by"],
+            "locked_at": system_lock_state["locked_at"],
+            "message": "System locked successfully.",
+        }, 200
+
+    @app.route("/api/system-unlock", methods=["POST"])
+    def api_system_unlock():
+        data = request.get_json(silent=True) or {}
+        password = (data.get("password") or "").strip()
+        if not password:
+            return {"error": "missing password"}, 400
+
+        admin_username = session.get("admin_username", ADMIN_USERNAME)
+        if not verify_admin_credentials(admin_username, password):
+            return {"error": "invalid credentials"}, 403
+
+        if not system_lock_state["locked"]:
+            return {"status": "unlocked", "message": "System is already unlocked."}, 200
+
+        system_lock_state["locked"] = False
+        system_lock_state["locked_by"] = None
+        system_lock_state["locked_at"] = None
+
+        with connect() as conn:
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                (
+                    "admin",
+                    admin_username,
+                    "system_unlocked",
+                    f"unlocked_by={admin_username}",
+                ),
+            )
+            conn.commit()
+
+        return {
+            "status": "unlocked",
+            "message": "System unlocked successfully.",
+        }, 200
 
     @app.get("/static/favicon.ico")
     def favicon():
@@ -1059,10 +1181,10 @@ def create_app() -> Flask:
                 if existing_status not in ("EXPIRED", "RETURNED"):
                     return {"error": "card_invalid_status", "rfid_uid": rfid_uid, "status": existing_status}, 409
             
-            # Reuse a returned or expired card record if the same RFID is being reissued.
             now = datetime.now()
-            expires_at = now + timedelta(hours=24)
-            expected_return = now + timedelta(hours=25)  # 1 hour grace period
+            issue_time = now.isoformat()
+            expires_at = ""
+            expected_return = None
             
             if existing and existing["status"] in ("EXPIRED", "RETURNED"):
                 conn.execute(
@@ -1072,9 +1194,9 @@ def create_app() -> Flask:
                     (
                         guest_id,
                         rfid_uid,
-                        now.isoformat(),
-                        expires_at.isoformat(),
-                        expected_return.isoformat(),
+                        issue_time,
+                        expires_at,
+                        expected_return,
                         admin_id,
                         checkout_notes or "Card issued by admin",
                         guest.get("locker_id"),
@@ -1082,14 +1204,12 @@ def create_app() -> Flask:
                 )
                 conn.execute(
                     "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                    ("admin", str(admin_id or "unknown"), "card_reissued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; valid_hours=24"),
+                    ("admin", str(admin_id or "unknown"), "card_reissued", f"guest_id={guest_id}; rfid_uid={rfid_uid}"),
                 )
                 return {
                     "status": "ok",
                     "message": f"Card reissued to {guest['full_name']}",
                     "rfid_uid": rfid_uid,
-                    "expires_at": expires_at.isoformat(),
-                    "expected_return_time": expected_return.isoformat()
                 }
             
             # Create card record
@@ -1101,9 +1221,9 @@ def create_app() -> Flask:
                     guest_id,
                     rfid_uid,
                     "ACTIVE",
-                    now.isoformat(),
-                    expires_at.isoformat(),
-                    expected_return.isoformat(),
+                    issue_time,
+                    expires_at,
+                    expected_return,
                     admin_id,
                     checkout_notes or "Card issued by admin",
                     guest.get("locker_id"),
@@ -1113,15 +1233,13 @@ def create_app() -> Flask:
             # Log the card issuance
             conn.execute(
                 "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                ("admin", str(admin_id or "unknown"), "card_issued", f"guest_id={guest_id}; rfid_uid={rfid_uid}; valid_hours=24"),
+                ("admin", str(admin_id or "unknown"), "card_issued", f"guest_id={guest_id}; rfid_uid={rfid_uid}"),
             )
         
         return {
             "status": "ok", 
             "message": f"Card issued to {guest['full_name']}", 
             "rfid_uid": rfid_uid,
-            "expires_at": expires_at.isoformat(),
-            "expected_return_time": expected_return.isoformat()
         }
     
     @app.post("/api/admin/assign-locker")
@@ -1196,186 +1314,270 @@ def create_app() -> Flask:
     @app.post("/api/admin/card-mark-lost")
     def admin_card_mark_lost():
         """Admin marks a guest RFID card as lost and blacklists it."""
-        data = request.get_json(silent=True) or {}
+        if not request.is_json:
+            return json_error("invalid_request", "Request body must be JSON.", 400)
+
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return json_error("invalid_request", "Request body must be a JSON object.", 400)
+
         rfid_uid = (data.get("rfid_uid") or "").strip()
         notes = (data.get("notes") or "").strip()
         charge_fee = data.get("charge_fee", False)  # Optional: charge replacement fee
-        
+
         if not rfid_uid:
-            return {"error": "missing rfid_uid"}, 400
-        
-        with connect() as conn:
-            # Get card info to find guest ID
-            card = conn.execute(
-                "SELECT id, guest_id, status FROM guest_rfid_cards WHERE rfid_uid = ?",
-                (rfid_uid,),
-            ).fetchone()
-            legacy_guest = None
-            if not card:
-                # Fallback for legacy guest entries stored only in members
-                legacy_guest = conn.execute(
-                    "SELECT id AS guest_id, expiry_date FROM members WHERE member_type = 'guest' AND rfid_uid = ?",
+            return json_error("missing_rfid_uid", "The rfid_uid field is required.", 400)
+
+        try:
+            with connect() as conn:
+                # Get the latest card entry for this RFID first.
+                card = conn.execute(
+                    "SELECT id, guest_id, status FROM guest_rfid_cards WHERE rfid_uid = ? ORDER BY issue_time DESC, id DESC LIMIT 1",
                     (rfid_uid,),
                 ).fetchone()
-                if not legacy_guest:
-                    return {"error": "card_not_found"}, 404
+                legacy_guest = None
+                if not card:
+                    # Fallback for legacy guest entries stored only in members
+                    legacy_guest = conn.execute(
+                        "SELECT id AS guest_id, expiry_date FROM members WHERE member_type = 'guest' AND rfid_uid = ?",
+                        (rfid_uid,),
+                    ).fetchone()
+                    if not legacy_guest:
+                        return json_error("card_not_found", "RFID card not found.", 404)
+                guest_id = (card or legacy_guest)["guest_id"]
 
-            guest_id = (card or legacy_guest)["guest_id"]
-            
-            # Update card status to LOST and BLACKLIST it
-            locker_row = conn.execute(
-                "SELECT locker_id FROM members WHERE id = ?",
-                (guest_id,),
-            ).fetchone()
-            locker_id = locker_row["locker_id"] if locker_row and locker_row["locker_id"] else None
+                # Update card status to LOST and BLACKLIST it
+                locker_row = conn.execute(
+                    "SELECT locker_id FROM members WHERE id = ?",
+                    (guest_id,),
+                ).fetchone()
+                locker_id = locker_row["locker_id"] if locker_row and locker_row["locker_id"] else None
 
-            if card:
+                if card:
+                    conn.execute(
+                        """UPDATE guest_rfid_cards 
+                           SET status = 'BLACKLISTED', return_notes = ?, locker_id = ?
+                           WHERE rfid_uid = ?""",
+                        (
+                            f"LOST - {notes}" if notes else "LOST - Card marked by admin",
+                            locker_id,
+                            rfid_uid,
+                        ),
+                    )
+                else:
+                    from datetime import datetime
+                    issue_time = datetime.now().isoformat()
+                    expires_at = ""
+                    expected_return = None
+                    conn.execute(
+                        "INSERT INTO guest_rfid_cards (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, return_notes, locker_id) VALUES (?, ?, 'BLACKLISTED', ?, ?, ?, ?, ?)",
+                        (
+                            guest_id,
+                            rfid_uid,
+                            issue_time,
+                            expires_at,
+                            expected_return,
+                            f"LOST - {notes}" if notes else "LOST - Card marked by admin",
+                            locker_id,
+                        ),
+                    )
+
+                # Log the action
                 conn.execute(
-                    """UPDATE guest_rfid_cards 
-                       SET status = 'BLACKLISTED', return_notes = ?, locker_id = ?
-                       WHERE rfid_uid = ?""",
-                    (
-                        f"LOST - {notes}" if notes else "LOST - Card marked by admin",
-                        locker_id,
-                        rfid_uid,
-                    ),
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("admin", "system", "card_blacklisted", f"rfid_uid={rfid_uid}; reason=lost"),
                 )
-            else:
-                from datetime import datetime
-                expires_at = legacy_guest["expiry_date"]
-                issue_time = datetime.now().isoformat()
-                conn.execute(
-                    "INSERT INTO guest_rfid_cards (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, return_notes, locker_id) VALUES (?, ?, 'BLACKLISTED', ?, ?, ?, ?, ?)",
-                    (
-                        guest_id,
-                        rfid_uid,
-                        issue_time,
-                        expires_at,
-                        expires_at,
-                        f"LOST - {notes}" if notes else "LOST - Card marked by admin",
-                        locker_id,
-                    ),
-                )
-            
-            # Log the action
-            conn.execute(
-                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                ("admin", "system", "card_blacklisted", f"rfid_uid={rfid_uid}; reason=lost"),
-            )
-            
-            # Optional: charge replacement fee
-            if charge_fee:
-                add_card_fee_to_payment(guest_id, f"Lost RFID card replacement - {rfid_uid}")
-        
-        return {"status": "ok", "message": f"Card {rfid_uid} blacklisted", "fee_charged": charge_fee}
+
+                # Optional: charge replacement fee
+                if charge_fee:
+                    add_card_fee_to_payment(guest_id, f"Lost RFID card replacement - {rfid_uid}")
+
+            return json_success({"status": "ok", "message": f"Card {rfid_uid} blacklisted", "fee_charged": charge_fee})
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            return json_error("server_error", "Unable to blacklist card due to internal error.", 500)
     
     @app.post("/api/admin/card-mark-returned")
     def admin_card_mark_returned():
         """Admin marks a guest RFID card as returned."""
         if not request.is_json:
-            return {"error": "invalid_request", "message": "Request body must be JSON."}, 400
+            return json_error("invalid_request", "Request body must be JSON.", 400)
 
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
-            return {"error": "invalid_request", "message": "Request body must be a JSON object."}, 400
+            return json_error("invalid_request", "Request body must be a JSON object.", 400)
 
         rfid_uid = (data.get("rfid_uid") or "").strip()
-        admin_id = data.get("admin_id") or session.get("admin_id")
         notes = (data.get("notes") or "").strip()
+        admin_id = data.get("admin_id") or session.get("admin_id")
 
         if not rfid_uid:
-            return {"error": "missing_rfid_uid", "message": "The rfid_uid field is required."}, 400
+            return json_error("missing_rfid_uid", "The rfid_uid field is required.", 400)
 
         from datetime import datetime
-        with connect() as conn:
-            card = conn.execute(
-                "SELECT id, guest_id, status, expires_at FROM guest_rfid_cards WHERE rfid_uid = ?",
-                (rfid_uid,),
-            ).fetchone()
-            legacy_guest = None
-            if not card:
-                legacy_guest = conn.execute(
-                    "SELECT id AS guest_id, expiry_date FROM members WHERE member_type = 'guest' AND rfid_uid = ?",
+
+        try:
+            with connect() as conn:
+                card = conn.execute(
+                    "SELECT id, guest_id, status FROM guest_rfid_cards WHERE rfid_uid = ? ORDER BY issue_time DESC, id DESC LIMIT 1",
                     (rfid_uid,),
                 ).fetchone()
-                if not legacy_guest:
-                    return {
-                        "error": "card_not_found",
-                        "message": f"RFID card {rfid_uid} was not found or is not registered in the system.",
-                    }, 404
 
-            locker_row = conn.execute(
-                "SELECT locker_id FROM members WHERE id = ?",
-                (guest_id,),
-            ).fetchone()
-            locker_id = locker_row["locker_id"] if locker_row and locker_row["locker_id"] else None
+                legacy_guest = None
+                if not card:
+                    legacy_guest = conn.execute(
+                        "SELECT id AS guest_id FROM members WHERE member_type = 'guest' AND rfid_uid = ?",
+                        (rfid_uid,),
+                    ).fetchone()
+                    if not legacy_guest:
+                        return json_error(
+                            "card_not_found",
+                            f"RFID card {rfid_uid} was not found or is not registered in the system.",
+                            404,
+                        )
 
-            if card:
-                cursor = conn.execute(
-                    """UPDATE guest_rfid_cards 
-                       SET status = 'RETURNED', return_admin_id = ?, actual_return_time = ?, return_notes = ?, locker_id = ?
-                       WHERE rfid_uid = ?""",
-                    (admin_id, datetime.now().isoformat(), notes or "Returned to admin", locker_id, rfid_uid),
-                )
-            else:
-                from datetime import datetime
-                expires_at = legacy_guest["expiry_date"]
-                issue_time = datetime.now().isoformat()
-                cursor = conn.execute(
-                    "INSERT INTO guest_rfid_cards (guest_id, rfid_uid, status, issue_time, expires_at, expected_return_time, actual_return_time, return_admin_id, return_notes, locker_id) VALUES (?, ?, 'RETURNED', ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        legacy_guest["guest_id"],
-                        rfid_uid,
-                        issue_time,
-                        expires_at,
-                        expires_at,
-                        datetime.now().isoformat(),
-                        admin_id,
-                        notes or "Returned to admin",
-                        locker_id,
-                    ),
-                )
+                guest_id = card["guest_id"] if card else legacy_guest["guest_id"]
 
-            if cursor.rowcount == 0:
-                return {
-                    "error": "card_not_found",
-                    "message": f"RFID card {rfid_uid} was not found or is not registered in the system.",
-                }, 404
+                if card and card["status"] == "RETURNED":
+                    return json_success({
+                        "status": "ok",
+                        "message": f"Card {rfid_uid} is already marked as returned.",
+                    })
 
-            # Release the locker assignment for this guest, if any.
-            guest_id = card["guest_id"] if card else legacy_guest["guest_id"]
-            locker = conn.execute(
-                "SELECT locker_id FROM members WHERE id = ?",
-                (guest_id,),
-            ).fetchone()
-            log_detail = f"rfid_uid={rfid_uid}; guest_id={guest_id}"
-            if locker and locker["locker_id"]:
-                locker_id = locker["locker_id"]
+                if card and card["status"] == "BLACKLISTED":
+                    return json_error(
+                        "card_blacklisted",
+                        "This card has been blacklisted and cannot be returned.",
+                        409,
+                    )
+
+                locker_row = conn.execute(
+                    "SELECT locker_id FROM members WHERE id = ?",
+                    (guest_id,),
+                ).fetchone()
+                locker_id = locker_row["locker_id"] if locker_row and locker_row["locker_id"] else None
+
+                if getattr(conn, "_is_postgres", False):
+                    schema_rows = conn.execute(
+                        "SELECT column_name FROM information_schema.columns WHERE table_name = %s",
+                        ("guest_rfid_cards",),
+                    ).fetchall()
+                    existing_columns = {row["column_name"] for row in schema_rows}
+                else:
+                    schema_rows = conn.execute("PRAGMA table_info(guest_rfid_cards)").fetchall()
+                    existing_columns = {row[1] for row in schema_rows}
+
+                supports_return_admin = "return_admin_id" in existing_columns
+                supports_actual_return = "actual_return_time" in existing_columns
+                supports_return_notes = "return_notes" in existing_columns
+                supports_locker_id = "locker_id" in existing_columns
+
+                if supports_return_admin and admin_id is not None:
+                    try:
+                        admin_id = int(admin_id)
+                    except (ValueError, TypeError):
+                        admin_id = None
+                    if admin_id is not None:
+                        valid_admin = conn.execute(
+                            "SELECT id FROM members WHERE id = ?",
+                            (admin_id,),
+                        ).fetchone()
+                        if not valid_admin:
+                            admin_id = None
+
+                if card:
+                    update_fields = ["status = 'RETURNED'"]
+                    params = []
+                    if supports_return_admin and admin_id is not None:
+                        update_fields.append("return_admin_id = ?")
+                        params.append(admin_id)
+                    if supports_actual_return:
+                        update_fields.append("actual_return_time = ?")
+                        params.append(datetime.now().isoformat())
+                    if supports_return_notes:
+                        update_fields.append("return_notes = ?")
+                        params.append(notes or "Returned to admin")
+                    if supports_locker_id:
+                        update_fields.append("locker_id = ?")
+                        params.append(locker_id)
+
+                    params.append(rfid_uid)
+                    cursor = conn.execute(
+                        f"UPDATE guest_rfid_cards SET {', '.join(update_fields)} WHERE rfid_uid = ?",
+                        tuple(params),
+                    )
+                else:
+                    issue_time = datetime.now().isoformat()
+                    expires_at = ""
+                    expected_return = None
+                    insert_columns = [
+                        "guest_id",
+                        "rfid_uid",
+                        "status",
+                        "issue_time",
+                        "expires_at",
+                        "expected_return_time",
+                    ]
+                    insert_values = [guest_id, rfid_uid, "RETURNED", issue_time, expires_at, expected_return]
+                    if supports_actual_return:
+                        insert_columns.append("actual_return_time")
+                        insert_values.append(datetime.now().isoformat())
+                    if supports_return_admin:
+                        insert_columns.append("return_admin_id")
+                        insert_values.append(admin_id)
+                    if supports_return_notes:
+                        insert_columns.append("return_notes")
+                        insert_values.append(notes or "Returned to admin")
+                    if supports_locker_id:
+                        insert_columns.append("locker_id")
+                        insert_values.append(locker_id)
+
+                    column_list = ", ".join(insert_columns)
+                    placeholder_list = ", ".join("?" for _ in insert_columns)
+                    cursor = conn.execute(
+                        f"INSERT INTO guest_rfid_cards ({column_list}) VALUES ({placeholder_list})",
+                        tuple(insert_values),
+                    )
+
+                if cursor.rowcount == 0:
+                    return json_error(
+                        "card_not_found",
+                        f"RFID card {rfid_uid} was not found or is not registered in the system.",
+                        404,
+                    )
+
+                locker = conn.execute(
+                    "SELECT locker_id FROM members WHERE id = ?",
+                    (guest_id,),
+                ).fetchone()
+                log_detail = f"rfid_uid={rfid_uid}; guest_id={guest_id}"
+                if locker and locker["locker_id"]:
+                    locker_id = locker["locker_id"]
+                    conn.execute(
+                        "UPDATE members SET locker_id = NULL WHERE id = ?",
+                        (guest_id,),
+                    )
+                    conn.execute(
+                        "UPDATE lockers SET status = 'available' WHERE id = ?",
+                        (locker_id,),
+                    )
+                    log_detail = f"rfid_uid={rfid_uid}; guest_id={guest_id}; locker_id={locker_id}"
+
                 conn.execute(
-                    "UPDATE members SET locker_id = NULL WHERE id = ?",
+                    "UPDATE members SET rfid_uid = NULL WHERE id = ?",
                     (guest_id,),
                 )
                 conn.execute(
-                    "UPDATE lockers SET status = 'available' WHERE id = ?",
-                    (locker_id,),
+                    "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                    ("admin", str(admin_id or "unknown"), "card_returned", log_detail),
                 )
-                log_detail = f"rfid_uid={rfid_uid}; guest_id={guest_id}; locker_id={locker_id}"
-            else:
-                log_detail = f"rfid_uid={rfid_uid}; guest_id={guest_id}"
 
-            # Clear the old guest RFID mapping so this card can be reassigned.
-            conn.execute(
-                "UPDATE members SET rfid_uid = NULL WHERE id = ?",
-                (guest_id,),
-            )
-
-            # Log the action
-            conn.execute(
-                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                ("admin", str(admin_id or "unknown"), "card_returned", log_detail),
-            )
-
-        return {"status": "ok", "message": f"Card {rfid_uid} marked as returned."}
+            return json_success({"status": "ok", "message": f"Card {rfid_uid} marked as returned."})
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            return json_error("server_error", "Unable to mark card returned due to internal error.", 500)
 
     @app.get("/api/admin/guest-list")
     def admin_guest_list():
@@ -1389,23 +1591,21 @@ def create_app() -> Flask:
                     SELECT id, full_name, locker_id, rfid_uid, expiry_date
                     FROM members
                     WHERE member_type = 'guest'
-                      AND (expiry_date IS NULL OR REPLACE(expiry_date, 'T', ' ') >= ?)
                       AND (full_name LIKE ? OR CAST(id AS TEXT) LIKE ? OR rfid_uid LIKE ?)
                     ORDER BY full_name ASC
                     LIMIT 200
                     """,
-                    (now, f"%{q}%", f"%{q}%", f"%{q}%"),
+                    (f"%{q}%", f"%{q}%", f"%{q}%"),
                 ).fetchall()
             else:
                 guests = conn.execute(
                     """
                     SELECT id, full_name, locker_id, rfid_uid, expiry_date
                     FROM members
-                    WHERE member_type = 'guest' AND (expiry_date IS NULL OR REPLACE(expiry_date, 'T', ' ') >= ?)
+                    WHERE member_type = 'guest'
                     ORDER BY full_name ASC
                     LIMIT 200
                     """,
-                    (now,),
                 ).fetchall()
 
         return {"guests": [dict(g) for g in guests]}
@@ -1428,7 +1628,7 @@ def create_app() -> Flask:
 
         legacy_rows = conn.execute(
             """SELECT id as guest_id, full_name as guest_name, contact_number, locker_id,
-                      rfid_uid, expiry_date
+                      rfid_uid
                    FROM members
                    WHERE member_type = 'guest'
                      AND rfid_uid IS NOT NULL
@@ -1437,11 +1637,10 @@ def create_app() -> Flask:
 
         for row in legacy_rows:
             card = dict(row)
-            expiry_at = card.get("expiry_date")
-            card["status"] = "ACTIVE" if not expiry_at or expiry_at >= now else "EXPIRED"
-            card["issue_time"] = card.get("expiry_date") or None
-            card["expires_at"] = expiry_at
-            card["expected_return_time"] = expiry_at
+            card["status"] = "ACTIVE"
+            card["issue_time"] = None
+            card["expires_at"] = ""
+            card["expected_return_time"] = None
             card["actual_return_time"] = None
             card["checkout_notes"] = "Legacy guest RFID card"
             card["return_notes"] = None
@@ -1451,13 +1650,10 @@ def create_app() -> Flask:
 
         for card in cards:
             status = card.get("status")
-            expires_at = card.get("expires_at")
-            expected_return_time = card.get("expected_return_time")
-            if status == "ACTIVE" and expires_at and expires_at < now:
-                card["action_needed"] = "EXPIRED"
-            elif status == "ACTIVE" and expected_return_time and expected_return_time < now:
-                card["action_needed"] = "OVERDUE"
-            elif status == "LOST":
+            if status == "EXPIRED":
+                card["status"] = "RETURNED"
+                status = "RETURNED"
+            if status == "LOST":
                 card["action_needed"] = "MISSING"
             else:
                 card["action_needed"] = status
@@ -1507,8 +1703,6 @@ def create_app() -> Flask:
                 "returned": sum(1 for c in cards_list if c.get("status") == "RETURNED"),
                 "lost": sum(1 for c in cards_list if c.get("status") == "LOST"),
                 "blacklisted": sum(1 for c in cards_list if c.get("status") == "BLACKLISTED"),
-                "expired": sum(1 for c in cards_list if c.get("action_needed") == "EXPIRED"),
-                "overdue": sum(1 for c in cards_list if c.get("action_needed") == "OVERDUE"),
                 "returned_today": sum(
                     1 for c in cards_list
                     if c.get("actual_return_time")

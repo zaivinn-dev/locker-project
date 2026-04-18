@@ -33,11 +33,8 @@ class BackgroundJobScheduler:
         """Main loop for background jobs."""
         while self.running:
             try:
-                # Run cleanup every hour
-                self.cleanup_expired_cards()
-                self.send_overdue_notifications()
-                
-                # Sleep for 1 hour
+                # No automatic guest expiry notifications: guest RFID cards no longer auto-expire.
+                # Background jobs remain idle unless additional tasks are added.
                 import time
                 time.sleep(3600)
             except Exception as e:
@@ -46,54 +43,8 @@ class BackgroundJobScheduler:
                 traceback.print_exc()
     
     def cleanup_expired_cards(self):
-        """Mark expired cards as EXPIRED automatically."""
-        from datetime import datetime
-        
-        with connect() as conn:
-            # Find cards that have passed expiry_at time
-            expired = conn.execute(
-                """SELECT id, rfid_uid, guest_id 
-                   FROM guest_rfid_cards 
-                   WHERE status = 'ACTIVE' 
-                   AND expires_at < datetime('now')
-                   AND expires_at > datetime('now', '-1 day')""",  # Only update once
-            ).fetchall()
-            
-            for card in expired:
-                conn.execute(
-                    """UPDATE guest_rfid_cards 
-                       SET status = 'EXPIRED' 
-                       WHERE id = ?""",
-                    (card["id"],),
-                )
-
-                # Release the locker assignment for this guest if one is still held.
-                locker_row = conn.execute(
-                    "SELECT locker_id FROM members WHERE id = ?",
-                    (card["guest_id"],),
-                ).fetchone()
-                if locker_row and locker_row["locker_id"]:
-                    locker_id = locker_row["locker_id"]
-                    conn.execute(
-                        "UPDATE members SET locker_id = NULL WHERE id = ?",
-                        (card["guest_id"],),
-                    )
-                    conn.execute(
-                        "UPDATE lockers SET status = 'available' WHERE id = ?",
-                        (locker_id,),
-                    )
-                    conn.execute(
-                        "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                        ("system", "background_job", "locker_released_on_expiry", f"rfid_uid={card['rfid_uid']}; locker_id={locker_id}"),
-                    )
-                else:
-                    conn.execute(
-                        "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                        ("system", "background_job", "card_auto_expired", f"rfid_uid={card['rfid_uid']}"),
-                    )
-            
-            if expired:
-                print(f"[CLEANUP] Auto-expired {len(expired)} cards")
+        """Deprecated cleanup method; guest access no longer auto-expires."""
+        return
     
     def send_overdue_notifications(self):
         """Send email notifications for overdue card returns."""

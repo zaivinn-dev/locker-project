@@ -379,11 +379,17 @@ def init_db() -> None:
                 """
             )
 
-        try:
-            conn.execute("ALTER TABLE guest_rfid_cards ADD COLUMN locker_id INTEGER")
-        except Exception as exc:
-            if not _column_exists_error(exc):
-                raise
+        for col_def in [
+            ("locker_id", "INTEGER"),
+            ("actual_return_time", "TEXT"),
+            ("return_admin_id", "INTEGER"),
+            ("return_notes", "TEXT"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE guest_rfid_cards ADD COLUMN {col_def[0]} {col_def[1]}")
+            except Exception as exc:
+                if not _column_exists_error(exc):
+                    raise
 
         _drop_guest_rfid_uid_unique_constraint(conn)
 

@@ -62,9 +62,9 @@
     <div class="col-6 col-lg-3">
       <div class="card" style="border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-radius: 0.5rem;">
         <div class="card-body p-3">
-          <div style="color: #6c757d; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;">Expired</div>
-          <div style="font-size: 1.8rem; font-weight: 700; color: #dc3545;">{{ expired_count }}</div>
-          <small class="text-muted">Access expired</small>
+          <div style="color: #6c757d; font-size: 0.8rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;">Inactive</div>
+          <div style="font-size: 1.8rem; font-weight: 700; color: #dc3545;">{{ inactive_count }}</div>
+          <small class="text-muted">Inactive or returned cards</small>
         </div>
       </div>
     </div>
@@ -104,7 +104,7 @@
           <select name="status" class="form-select form-select-sm">
             <option value="all" {{ 'selected' if status_filter == 'all' else '' }}>All Guests</option>
             <option value="active" {{ 'selected' if status_filter == 'active' else '' }}>Active</option>
-            <option value="expired" {{ 'selected' if status_filter == 'expired' else '' }}>Expired</option>
+            <option value="inactive" {{ 'selected' if status_filter == 'inactive' else '' }}>Inactive</option>
           </select>
         </div>
 
@@ -164,7 +164,6 @@
               <th style="width: 100px;">Locker</th>
               <th style="width: 120px;">Category</th>
               <th style="width: 110px;">Payment</th>
-              <th style="width: 140px;">Access Until</th>
               <th style="width: 100px;">Status</th>
               <th>Actions</th>
             </tr>
@@ -172,13 +171,7 @@
           <tbody>
             {% if guests %}
               {% for guest in guests %}
-                {% set card_expires_at = guest.card_expires_at or guest.expiry_date %}
-                {% set is_card_expired = card_expires_at and card_expires_at.replace('T', ' ') < now.strftime('%Y-%m-%d %H:%M:%S') %}
-                {% if guest.card_status == 'ACTIVE' and is_card_expired %}
-                  {% set card_status = 'EXPIRED' %}
-                {% else %}
-                  {% set card_status = guest.card_status or (is_card_expired and 'EXPIRED' or 'ACTIVE') %}
-                {% endif %}
+                {% set card_status = guest.card_status or 'UNKNOWN' %}
                 <tr>
                   <td class="text-muted small fw-bold">#{{ guest.id }}</td>
                   <td class="small">{{ guest.full_name }}</td>
@@ -199,15 +192,10 @@
                   <td>
                     <span class="text-dark small fw-semibold">₱{{ "{:,}".format(guest.total_payments) }}</span>
                   </td>
-                  <td class="text-muted small">
-                    {{ (guest.card_expires_at or guest.expiry_date).replace('T', ' ')[:16] if (guest.card_expires_at or guest.expiry_date) else "—" }}
-                  </td>
                   <td>
                     {% if card_status == 'ACTIVE' %}
                       <span class="badge bg-success" style="font-size: 0.75rem;">Active</span>
-                    {% elif card_status == 'EXPIRED' %}
-                      <span class="badge bg-danger" style="font-size: 0.75rem;">Expired</span>
-                    {% elif card_status == 'RETURNED' %}
+                    {% elif card_status in ['EXPIRED', 'RETURNED'] %}
                       <span class="badge bg-warning text-dark" style="font-size: 0.75rem;">Returned</span>
                     {% elif card_status == 'BLACKLISTED' %}
                       <span class="badge bg-dark" style="font-size: 0.75rem;">Blacklisted</span>
@@ -235,7 +223,7 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="9" class="p-4">
+                <td colspan="8" class="p-4">
                   <div class="text-center py-4">
                     <div class="mb-3">
                       <span class="badge bg-info text-dark">No guest access cards found</span>
@@ -308,12 +296,6 @@
                         </select>
                         <small id="guestLockerHelp" class="form-text text-muted">Only lockers that are currently available will appear here.</small>
                     </div>
-                    <input type="hidden" id="guestDuration" name="duration_hours" value="24" />
-                    <div class="mb-3">
-                        <label class="form-label">Access Duration</label>
-                        <div class="form-control-plaintext text-success">Fixed to 24 hours</div>
-                        <small class="text-muted">Guest RFID access automatically expires 24 hours after issuance.</small>
-                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -341,7 +323,6 @@
                     <li class="list-group-item"><strong>Full Name:</strong> <span id="guestSuccessName"></span></li>
                     <li class="list-group-item"><strong>RFID:</strong> <span id="guestSuccessRfid"></span></li>
                     <li class="list-group-item"><strong>Locker:</strong> #<span id="guestSuccessLocker"></span></li>
-                    <li class="list-group-item"><strong>Duration:</strong> <span id="guestSuccessDuration"></span></li>
                     <li class="list-group-item"><strong>Payment:</strong> <span id="guestSuccessPayment"></span></li>
                 </ul>
             </div>
@@ -482,14 +463,13 @@ document.getElementById('createGuestForm').addEventListener('submit', function(e
     const guestName = formData.get('full_name');
     const guestRfid = formData.get('rfid_uid');
     const guestLocker = formData.get('locker_id');
-    const duration = 24;
     const paymentAmount = formData.get('payment_amount');
 
     fetch('{{ url_for("admin.admin_create_guest") }}', {
         method: 'POST',
         body: formData,
     })
-    .then(response => response.json().then(payload => ({ status: response.status, payload })))
+    .then(response => parseJSONResponse(response).then(payload => ({ status: response.status, payload })))
     .then(({ status, payload }) => {
         if (status >= 200 && status < 300) {
             const createModal = bootstrap.Modal.getInstance(createGuestModal);
@@ -498,7 +478,6 @@ document.getElementById('createGuestForm').addEventListener('submit', function(e
             document.getElementById('guestSuccessName').textContent = guestName;
             document.getElementById('guestSuccessRfid').textContent = guestRfid;
             document.getElementById('guestSuccessLocker').textContent = guestLocker;
-            document.getElementById('guestSuccessDuration').textContent = '24 hours';
             document.getElementById('guestSuccessPayment').textContent = `₱${paymentAmount}`;
 
             const successModal = new bootstrap.Modal(document.getElementById('guestSuccessModal'));
@@ -511,7 +490,7 @@ document.getElementById('createGuestForm').addEventListener('submit', function(e
             return;
         }
 
-        const message = payload && payload.error ? payload.error : 'Unable to create guest access.';
+        const message = payload?.message || payload?.error || 'Unable to create guest access.';
         setCreateGuestAlert(message, 'warning');
     })
     .catch(err => {
@@ -552,7 +531,6 @@ function showGuestDetails(guestId) {
                   <div class="mb-3"><strong>Category</strong><div>${data.category ? data.category.charAt(0).toUpperCase() + data.category.slice(1) : 'Regular'}</div></div>
                 </div>
                 <div class="col-12 col-md-6">
-                  <div class="mb-3"><strong>Expiry</strong><div>${data.expiry_date ? data.expiry_date.replace('T', ' ') : 'No expiry'}</div></div>
                   <div class="mb-3"><strong>Total Payments</strong><div>₱${data.total_payments || 0}</div></div>
                   <div class="mb-3"><strong>Payment Count</strong><div>${data.payment_count || 0}</div></div>
                 </div>
@@ -596,7 +574,7 @@ function renderCardAuditSummary(data) {
     const summary = data.summary || {};
     const cards = data.cards || [];
     const rows = cards.slice(0, 12).map(card => {
-        const status = card.action_needed || card.status || 'UNKNOWN';
+        const status = card.status || 'UNKNOWN';
         const canAct = card.rfid_uid && !['RETURNED','BLACKLISTED','LOST'].includes(card.status);
         const actionButtons = canAct ? `
                     <button type="button" class="btn btn-sm btn-success me-1" onclick="markCardReturned('${card.rfid_uid}')">Return</button>
@@ -607,8 +585,6 @@ function renderCardAuditSummary(data) {
                     <td>${card.rfid_uid || '—'}</td>
                     <td>${card.guest_name || '—'}</td>
                     <td>${card.locker_id !== undefined && card.locker_id !== null ? `#${card.locker_id}` : '—'}</td>
-                    <td>${card.expires_at ? card.expires_at.replace('T', ' ') : '—'}</td>
-                    <td>${card.expected_return_time ? card.expected_return_time.replace('T', ' ') : '—'}</td>
                     <td>${status}</td>
                     <td>${actionButtons}</td>
                   </tr>`;
@@ -619,9 +595,8 @@ function renderCardAuditSummary(data) {
                 <div class="col-6 col-md-4 mb-2"><strong>Total cards:</strong> ${data.total_cards}</div>
                 <div class="col-6 col-md-4 mb-2"><strong>Active:</strong> ${summary.active || 0}</div>
                 <div class="col-6 col-md-4 mb-2"><strong>Returned:</strong> ${summary.returned || 0}</div>
-                <div class="col-6 col-md-4 mb-2"><strong>Expired:</strong> ${summary.expired || 0}</div>
-                <div class="col-6 col-md-4 mb-2"><strong>Overdue:</strong> ${summary.overdue || 0}</div>
                 <div class="col-6 col-md-4 mb-2"><strong>Lost/Blacklisted:</strong> ${summary.lost || 0} / ${summary.blacklisted || 0}</div>
+                <div class="col-6 col-md-4 mb-2"><strong>Returned today:</strong> ${summary.returned_today || 0}</div>
               </div>
               <div class="table-responsive">
                 <table class="table table-sm table-hover">
@@ -630,13 +605,11 @@ function renderCardAuditSummary(data) {
                       <th>RFID</th>
                       <th>Guest</th>
                       <th>Locker</th>
-                      <th>Expires At</th>
-                      <th>Return Due</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
-                  <tbody>${rows || '<tr><td colspan="7" class="text-center">No card audit entries found. Issue a guest RFID card to populate this report.</td></tr>'}</tbody>
+                  <tbody>${rows || '<tr><td colspan="5" class="text-center">No card audit entries found. Issue a guest RFID card to populate this report.</td></tr>'}</tbody>
                 </table>
               </div>
             `;
@@ -645,7 +618,7 @@ function renderCardAuditSummary(data) {
 function renderCardAuditHistory(data) {
     const cards = data.cards || [];
     const rows = cards.slice(0, 100).map(card => {
-        const status = card.action_needed || card.status || 'UNKNOWN';
+        const status = card.status || 'UNKNOWN';
         const guestName = card.guest_name || 'Unknown guest';
         const guestRfid = card.rfid_uid || '—';
         const issuer = card.checkout_notes || '—';
@@ -662,8 +635,6 @@ function renderCardAuditHistory(data) {
                     <td>${guestName}</td>
                     <td>${card.locker_id !== undefined && card.locker_id !== null ? `#${card.locker_id}` : '—'}</td>
                     <td>${card.issue_time ? card.issue_time.replace('T', ' ') : '—'}</td>
-                    <td>${card.expires_at ? card.expires_at.replace('T', ' ') : '—'}</td>
-                    <td>${card.expected_return_time ? card.expected_return_time.replace('T', ' ') : '—'}</td>
                     <td>${actualReturn}</td>
                     <td>${status}</td>
                     <td>${issuer}</td>
@@ -691,8 +662,6 @@ function renderCardAuditHistory(data) {
                       <th>Guest</th>
                       <th>Locker</th>
                       <th>Issued</th>
-                      <th>Expires At</th>
-                      <th>Return Due</th>
                       <th>Actual Return</th>
                       <th>Status</th>
                       <th>Checkout Notes</th>
@@ -700,7 +669,7 @@ function renderCardAuditHistory(data) {
                       <th>Actions</th>
                     </tr>
                   </thead>
-                  <tbody>${rows || '<tr><td colspan="11" class="text-center">No history records found. Issue a guest RFID card to generate audit history.</td></tr>'}</tbody>
+                  <tbody>${rows || '<tr><td colspan="9" class="text-center">No history records found. Issue a guest RFID card to generate audit history.</td></tr>'}</tbody>
                 </table>
               </div>
             `;
@@ -749,6 +718,20 @@ function showCardAuditHistory(q = '') {
         });
 }
 
+function parseJSONResponse(response) {
+    return response.text().then(text => {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            try {
+                return JSON.parse(text);
+            } catch (err) {
+                return { error: 'invalid_json', message: text || 'Invalid JSON response' };
+            }
+        }
+        return { error: 'server_error', message: text || 'Unexpected server response' };
+    });
+}
+
 function markCardReturned(rfid_uid) {
     if (!confirm(`Mark card ${rfid_uid} as returned?`)) {
         return;
@@ -761,13 +744,13 @@ function markCardReturned(rfid_uid) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rfid_uid }),
     })
-        .then(response => response.json().then(payload => ({ status: response.status, payload })))
+        .then(response => parseJSONResponse(response).then(payload => ({ status: response.status, payload })))
         .then(({ status, payload }) => {
             if (status >= 200 && status < 300) {
                 refreshCardAuditView();
                 return;
             }
-            content.innerHTML = `<div class="alert alert-danger">${payload.error || 'Unable to mark card returned.'}</div>`;
+            content.innerHTML = `<div class="alert alert-danger">${payload.message || payload.error || 'Unable to mark card returned.'}</div>`;
         })
         .catch(err => {
             console.error('Error marking card returned:', err);
@@ -787,13 +770,13 @@ function markCardLost(rfid_uid) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rfid_uid, charge_fee: false }),
     })
-        .then(response => response.json().then(payload => ({ status: response.status, payload })))
+        .then(response => parseJSONResponse(response).then(payload => ({ status: response.status, payload })))
         .then(({ status, payload }) => {
             if (status >= 200 && status < 300) {
                 refreshCardAuditView();
                 return;
             }
-            content.innerHTML = `<div class="alert alert-danger">${payload.error || 'Unable to mark card lost.'}</div>`;
+            content.innerHTML = `<div class="alert alert-danger">${payload.message || payload.error || 'Unable to mark card lost.'}</div>`;
         })
         .catch(err => {
             console.error('Error marking card lost:', err);
