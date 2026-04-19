@@ -1,5 +1,8 @@
 import os
+import socket
+import time
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -36,15 +39,25 @@ class LockerState:
 
 class ESP32DeviceController:
     def __init__(self, base_url: str | None = None, timeout: float = 2.0, retries: int = 1):
-        self.base_url = base_url or os.getenv("ESP32_BASE_URL", "http://192.168.4.1")
+        self.base_url = base_url or os.getenv("ESP32_BASE_URL", "http://esp32-locker.local")
         fallback_urls = os.getenv("ESP32_FALLBACK_URLS", "")
         self.fallback_urls = [url.strip() for url in fallback_urls.split(",") if url.strip()]
-        self.device_urls = [self.base_url] + self.fallback_urls
+        
+        # Initialize URL list with fallback
+        self.configured_urls = [self.base_url] + self.fallback_urls
+        self.device_urls = self._resolve_urls(self.configured_urls)
+        
         self.timeout = float(os.getenv("ESP32_TIMEOUT", timeout))
         self.connect_timeout = float(os.getenv("ESP32_CONNECT_TIMEOUT", 5.0))
         self.retries = int(os.getenv("ESP32_MAX_RETRIES", retries))
         fingerprint_paths = os.getenv("ESP32_FINGERPRINT_PATHS", "/fingerprint/start-enrollment")
         self.fingerprint_paths = [p.strip() for p in fingerprint_paths.split(",") if p.strip()]
+        
+        # Health check tracking
+        self.last_working_url = None
+        self.last_health_check = 0
+        self.health_check_interval = int(os.getenv("ESP32_HEALTH_CHECK_INTERVAL", 30))
+        
         self.session = requests.Session()
         self.session.trust_env = False
 
@@ -59,14 +72,59 @@ class ESP32DeviceController:
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
-        print(f"[ESP32] Device URLs: {self.device_urls}")
+        print(f"[ESP32] Configured URLs: {self.configured_urls}")
+        print(f"[ESP32] Resolved URLs: {self.device_urls}")
         print(f"[ESP32] Connect timeout: {self.connect_timeout}s, read timeout: {self.timeout}s")
         print(f"[ESP32] HTTP retries: {self.retries}")
+        print(f"[ESP32] Health check interval: {self.health_check_interval}s")
         print(f"[ESP32] Fingerprint paths: {self.fingerprint_paths}")
 
+    def _resolve_urls(self, urls: list) -> list:
+        """Resolve hostnames to IPs where possible for faster connection."""
+        resolved = []
+        for url in urls:
+            try:
+                parsed = urlparse(url)
+                hostname = parsed.netloc.split(":")[0]
+                
+                # Try to resolve hostname to IP
+                try:
+                    ip = socket.gethostbyname(hostname)
+                    if ip != hostname:  # Only replace if resolution succeeded
+                        resolved_url = url.replace(hostname, ip)
+                        print(f"[ESP32] Resolved hostname '{hostname}' → {ip}")
+                        resolved.append(resolved_url)
+                    else:
+                        resolved.append(url)
+                except socket.gaierror:
+                    # Hostname couldn't be resolved, keep as-is for mDNS fallback
+                    print(f"[ESP32] Hostname '{hostname}' not resolved yet (will retry at runtime)")
+                    resolved.append(url)
+            except Exception as e:
+                print(f"[ESP32] Error parsing URL {url}: {e}")
+                resolved.append(url)
+        
+        return resolved
+
+    def _get_urls_for_request(self) -> list:
+        """Get URLs in optimal order: last working first, then others."""
+        current_time = time.time()
+        
+        # If we have a recently working URL, try it first
+        if (self.last_working_url and 
+            (current_time - self.last_health_check) < self.health_check_interval):
+            other_urls = [u for u in self.device_urls if u != self.last_working_url]
+            return [self.last_working_url] + other_urls
+        
+        return self.device_urls
+
     def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
+        """Make HTTP request with intelligent fallback and health checking."""
+        urls_to_try = self._get_urls_for_request()
+        current_time = time.time()
         last_error = None
-        for base_url in self.device_urls:
+        
+        for base_url in urls_to_try:
             url = f"{base_url}{path}"
             try:
                 if method == "POST":
@@ -78,6 +136,11 @@ class ESP32DeviceController:
 
                 r.raise_for_status()
                 print(f"[ESP32] Response {r.status_code} from {url}")
+                
+                # Update health check state
+                self.last_working_url = base_url
+                self.last_health_check = current_time
+                
                 return r.json()
             except requests.exceptions.HTTPError as e:
                 print(f"[ESP32] HTTP ERROR contacting {url}: {type(e).__name__}: {e}")
@@ -100,7 +163,7 @@ class ESP32DeviceController:
 
         if last_error:
             raise last_error
-        raise RuntimeError(f"Failed to contact ESP32 at any configured URL: {self.device_urls}")
+        raise RuntimeError(f"Failed to contact ESP32 at any configured URL: {urls_to_try}")
 
     def _post(self, path: str, payload: dict | None = None) -> dict:
         return self._request("POST", path, payload)
