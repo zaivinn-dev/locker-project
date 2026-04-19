@@ -5,7 +5,6 @@
 #include <SPI.h>
 #include <MFRC522.h>
 #include <Adafruit_Fingerprint.h>
-#include <ESPmDNS.h>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
@@ -31,14 +30,13 @@ const int IR_SENSOR_PINS[4][2] = {
 
 const char* WIFI_SSID = "Emelon Wifi";
 const char* WIFI_PASSWORD = "emelonwifi123";
-const char* ESP32_HOSTNAME = "esp32-locker";  // mDNS hostname
-const char* BACKEND_HOST = "http://raspberrypi-locker.local:5000";
-const char* BACKEND_RFID_URL = "http://raspberrypi-locker.local:5000/device/rfid";
-const char* BACKEND_IR_URL = "http://raspberrypi-locker.local:5000/device/ir-status";
-const char* BACKEND_FINGERPRINT_URL = "http://raspberrypi-locker.local:5000/device/fingerprint";
-const char* BACKEND_FINGERPRINT_ENROLL_URL = "http://raspberrypi-locker.local:5000/device/fingerprint/enroll";
-const char* BACKEND_FINGERPRINT_START_ENROLL_URL = "http://raspberrypi-locker.local:5000/device/fingerprint/start-enrollment";
-const char* BACKEND_SCAN_ENABLED_URL = "http://raspberrypi-locker.local:5000/api/access/scan-enabled";
+const char* BACKEND_HOST = "http://192.168.2.102:5000";
+const char* BACKEND_RFID_URL = "http://192.168.2.102:5000/device/rfid";
+const char* BACKEND_IR_URL = "http://192.168.2.102:5000/device/ir-status";
+const char* BACKEND_FINGERPRINT_URL = "http://192.168.2.102:5000/device/fingerprint";
+const char* BACKEND_FINGERPRINT_ENROLL_URL = "http://192.168.2.102:5000/device/fingerprint/enroll";
+const char* BACKEND_FINGERPRINT_START_ENROLL_URL = "http://192.168.2.102:5000/device/fingerprint/start-enrollment";
+const char* BACKEND_SCAN_ENABLED_URL = "http://192.168.2.102:5000/api/access/scan-enabled";
 const unsigned long FINGERPRINT_POLL_INTERVAL = 100; // Poll fingerprint sensor every 100ms (faster response)
 const int FINGERPRINT_RX_PIN = 16;
 const int FINGERPRINT_TX_PIN = 17;
@@ -391,20 +389,6 @@ void setupWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\n   ✓ Connected to: " + String(WIFI_SSID));
     Serial.println("   ✓ IP: " + WiFi.localIP().toString());
-    
-    // Initialize mDNS for hostname resolution
-    if (!MDNS.begin(ESP32_HOSTNAME)) {
-      Serial.println("   ⚠ mDNS init failed");
-    } else {
-      Serial.println("   ✓ mDNS hostname: " + String(ESP32_HOSTNAME) + ".local");
-      // Add service descriptions
-      MDNS.addService("http", "tcp", 80);
-    }
-    
-    // Set hostname for network visibility
-    WiFi.setHostname(ESP32_HOSTNAME);
-    Serial.println("   ✓ WiFi hostname set to: " + String(ESP32_HOSTNAME));
-    
     Serial.println("   ✓ RFID Backend: " + String(BACKEND_RFID_URL));
     Serial.println("   ✓ IR Backend: " + String(BACKEND_IR_URL));
     Serial.println("   ✓ Fingerprint Backend: " + String(BACKEND_FINGERPRINT_URL));
