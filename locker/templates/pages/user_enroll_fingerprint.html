@@ -459,13 +459,13 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = await response.json().catch(() => ({}));
       const message = data.message || data.error || 'Failed to start enrollment. Please try again.';
       
-      if (response.ok && (data.status === 'pending' || data.status === 'waiting')) {
+      if (response.ok && (data.success === true || data.status === 'pending' || data.status === 'waiting')) {
         // Hide start button and show status
         startEnrollmentSection.style.display = 'none';
         statusDiv.style.display = 'block';
         resetStatusPanel();
         setEnrollmentStatus(data.message || 'Activating fingerprint scanner...', 'Please wait while we connect to the device.', '🔄', '#0f6e56');
-        
+
         // Start polling for enrollment status
         startPolling();
       } else {

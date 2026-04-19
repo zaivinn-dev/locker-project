@@ -248,6 +248,20 @@ def init_db() -> None:
             )
 
             conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admins (
+                  id SERIAL PRIMARY KEY,
+                  username TEXT NOT NULL UNIQUE,
+                  password_hash TEXT NOT NULL,
+                  role TEXT NOT NULL DEFAULT 'Admin',
+                  status TEXT NOT NULL DEFAULT 'active',
+                  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  created_by TEXT
+                )
+                """
+            )
+
+            conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_members_fingerprint_uid ON members(fingerprint_uid)"
             )
 
@@ -342,6 +356,20 @@ def init_db() -> None:
                     "INSERT OR IGNORE INTO lockers (id, label) VALUES (?, ?)",
                     (i, f"Locker {i}"),
                 )
+
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS admins (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  username TEXT NOT NULL UNIQUE,
+                  password_hash TEXT NOT NULL,
+                  role TEXT NOT NULL DEFAULT 'Admin',
+                  status TEXT NOT NULL DEFAULT 'active',
+                  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                  created_by TEXT
+                )
+                """
+            )
 
             conn.execute(
                 """

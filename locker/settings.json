@@ -13,7 +13,7 @@
   "facility_name": "Multi-Modal Access Locker System with Object Detection and Web-Based Monitoring",
   "facility_address": "123 Main Street",
   "facility_phone": "+63 (0) 000-0000",
-  "facility_email": "info@smartlocker.com",
+  "facility_email": "MarcusGym@locker.com",
   "unlock_duration": 5,
   "rfid_timeout": 10,
   "fingerprint_timeout": 10,

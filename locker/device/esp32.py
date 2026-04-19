@@ -40,8 +40,8 @@ class ESP32DeviceController:
         fallback_urls = os.getenv("ESP32_FALLBACK_URLS", "")
         self.fallback_urls = [url.strip() for url in fallback_urls.split(",") if url.strip()]
         self.device_urls = [self.base_url] + self.fallback_urls
-        self.timeout = timeout
-        self.connect_timeout = float(os.getenv("ESP32_CONNECT_TIMEOUT", 1.0))
+        self.timeout = float(os.getenv("ESP32_TIMEOUT", timeout))
+        self.connect_timeout = float(os.getenv("ESP32_CONNECT_TIMEOUT", 5.0))
         self.retries = int(os.getenv("ESP32_MAX_RETRIES", retries))
         fingerprint_paths = os.getenv("ESP32_FINGERPRINT_PATHS", "/fingerprint/start-enrollment")
         self.fingerprint_paths = [p.strip() for p in fingerprint_paths.split(",") if p.strip()]

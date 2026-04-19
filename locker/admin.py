@@ -8,6 +8,7 @@ import requests
 from flask import Blueprint, jsonify, make_response, redirect, render_template, request, session, url_for
 import json
 import os
+from werkzeug.security import generate_password_hash, check_password_hash
 
 try:
     from .db import connect
@@ -102,6 +103,40 @@ def _require_admin():
     return None
 
 
+def _normalize_role(role: str | None) -> str:
+    """Normalize role values into canonical title-case strings."""
+    if not role:
+        return ""
+    return role.strip().title()
+
+
+def _require_role(*allowed_roles):
+    """Check if current user is authenticated and has one of the allowed roles."""
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.admin_login"))
+
+    current_role = _normalize_role(session.get("admin_role", ""))
+    normalized_allowed = tuple(_normalize_role(role) for role in allowed_roles)
+    if current_role not in normalized_allowed:
+        flask.flash("Access denied: you do not have permission to perform that action.", "danger")
+        return redirect(url_for("admin.admin_dashboard"))
+
+    return None
+
+
+def _reset_id_sequences(conn):
+    """Reset auto-increment/serial sequences for supported databases."""
+    if not conn._is_postgres:
+        conn.execute("DELETE FROM sqlite_sequence")
+        return
+
+    for table_name in ["members", "payments", "access_logs", "guest_rfid_cards", "lockers"]:
+        conn.execute(
+            "SELECT setval(pg_get_serial_sequence(%s, %s), 1, false)",
+            (table_name, "id"),
+        )
+
+
 def _load_locker_statuses():
     """Load locker assignments and current physical lock state."""
     lockers = []
@@ -169,15 +204,54 @@ def verify_admin_credentials(username: str, password: str) -> bool:
     return hmac.compare_digest(username, ADMIN_USERNAME) and hmac.compare_digest(password, ADMIN_PASSWORD)
 
 
+def verify_admin_credentials_with_db(username: str, password: str) -> dict:
+    """Verify admin credentials against environment variable or database.
+    
+    Returns dict with 'valid' (bool), 'admin_id' (int), 'username' (str), 'role' (str).
+    """
+    # First check environment variable (master admin)
+    if verify_admin_credentials(username, password):
+        return {
+            "valid": True,
+            "admin_id": 1,
+            "username": username,
+            "role": "Admin",
+            "source": "env",
+        }
+    
+    # Then check database admins
+    try:
+        with connect() as conn:
+            admin = conn.execute(
+                "SELECT id, username, password_hash, role, status FROM admins WHERE username = ? AND status = 'active'",
+                (username,),
+            ).fetchone()
+            
+            if admin and check_password_hash(admin["password_hash"], password):
+                return {
+                    "valid": True,
+                    "admin_id": admin["id"],
+                    "username": admin["username"],
+                    "role": _normalize_role(admin["role"]),
+                    "source": "db",
+                }
+    except Exception:
+        pass
+    
+    return {"valid": False, "admin_id": None, "username": None, "role": None}
+
+
 @admin_bp.post("/login")
 def admin_login_submit():
     username = (request.form.get("username") or "").strip()
     password = (request.form.get("password") or "").strip()
 
-    if verify_admin_credentials(username, password):
+    creds = verify_admin_credentials_with_db(username, password)
+    if creds["valid"]:
         session["admin_logged_in"] = True
         session["admin_username"] = username
-        session["admin_id"] = 1
+        session["admin_id"] = creds["admin_id"]
+        session["admin_role"] = _normalize_role(creds["role"])
         return redirect(url_for("admin.admin_dashboard"))
 
     return render_template(
@@ -195,7 +269,7 @@ def admin_logout():
 
 @admin_bp.post("/unlock-all")
 def admin_unlock_all():
-    guard = _require_admin()
+    guard = _require_role("Admin")
     if guard is not None:
         flask.flash("Action denied: Not logged in as admin", "danger")
         return guard
@@ -250,7 +324,7 @@ def reset_data_get():
 def reset_data():
     debug_info = ["Reset attempt started"]
     
-    guard = _require_admin()
+    guard = _require_role("Admin")
     if guard is not None:
         debug_info.append("Admin authentication failed - redirecting to login")
         flask.flash("Reset failed: Not logged in as admin", "danger")
@@ -280,22 +354,40 @@ def reset_data():
             )
             debug_info.append("Logged reset action")
             
+            # Temporarily disable foreign key checks for SQLite
+            if not conn._is_postgres:
+                conn.execute("PRAGMA foreign_keys = OFF")
+                debug_info.append("Disabled foreign key checks")
+            
             # Delete all payments first (due to foreign key constraints)
             result = conn.execute("DELETE FROM payments")
             debug_info.append(f"Deleted {result.rowcount} payments")
             
-            # Delete all members (regular and guest)
-            result = conn.execute("DELETE FROM members")
-            debug_info.append(f"Deleted {result.rowcount} members")
+            # Delete all guest RFID cards (references members)
+            result = conn.execute("DELETE FROM guest_rfid_cards")
+            debug_info.append(f"Deleted {result.rowcount} guest RFID cards")
             
             # Delete all access logs
             result = conn.execute("DELETE FROM access_logs")
             debug_info.append(f"Deleted {result.rowcount} access logs")
             
+            # Delete all members (regular and guest) - now safe since no dependencies
+            result = conn.execute("DELETE FROM members")
+            debug_info.append(f"Deleted {result.rowcount} members")
+            
             # Reset all lockers to available
             result = conn.execute("UPDATE lockers SET status = 'available'")
             debug_info.append(f"Reset {result.rowcount} lockers")
             
+            # Reset auto-increment sequences
+            _reset_id_sequences(conn)
+            debug_info.append("Reset auto-increment sequences (IDs will start from 1)")
+
+            # Re-enable foreign key checks for SQLite
+            if not conn._is_postgres:
+                conn.execute("PRAGMA foreign_keys = ON")
+                debug_info.append("Re-enabled foreign key checks")
+
             # Reset fingerprint enrollment state
             global fingerprint_enrollment_state
             fingerprint_enrollment_state = {
@@ -315,7 +407,7 @@ def reset_data():
             debug_info.append("Transaction committed successfully")
         
         debug_info.append("Reset completed successfully")
-        flask.flash("All data has been reset successfully", "success")
+        flask.flash("All data has been reset successfully. Auto-incrementing IDs have been reset to 1.", "success")
         return redirect(url_for("admin.admin_dashboard"))
         
     except Exception as e:
@@ -329,7 +421,7 @@ def reset_data():
 @admin_bp.post("/clear-fingerprints")
 def clear_fingerprints():
     """Clear all fingerprint templates from device."""
-    guard = _require_admin()
+    guard = _require_role("Admin")
     if guard is not None:
         flask.flash("Access denied: Not logged in as admin", "danger")
         return guard
@@ -1624,15 +1716,7 @@ def admin_settings():
         return guard
     
     settings = load_settings()
-    admin_users = [
-        {
-            "id": 1,
-            "username": "admin",
-            "email": "admin@example.com",
-            "role": "Super Admin",
-            "status": "Active",
-        }
-    ]
+    admin_users = []
 
     lockers = []
     try:
@@ -1643,12 +1727,15 @@ def admin_settings():
             exc,
         )
 
+    current_admin_role = _normalize_role(session.get("admin_role", "Admin"))
     return render_template(
         "admin/pages/admin_settings.html",
         settings=settings,
         lockers=lockers,
         current_page="settings",
         admin_username=session.get("admin_username"),
+        current_admin_role=current_admin_role,
+        can_access_maintenance=(current_admin_role == "Admin"),
         now=datetime.now(),
         admin_users=admin_users,
         current_admin_id=session.get("admin_id", 1),
@@ -1663,38 +1750,36 @@ def admin_settings_update():
     if guard is not None:
         return guard
     
-    # Collect form data with proper type conversions
-    settings_data = {
-        "system_name": request.form.get("system_name", "Smart Locker"),
-        "timezone": request.form.get("timezone", "Asia/Manila"),
-        "currency": request.form.get("currency", "₱"),
-        "language": request.form.get("language", "en"),
-        "membership_fee": int(request.form.get("membership_fee", 400)),
-        "membership_duration": int(request.form.get("membership_duration", 30)),
-        "renewal_fee": int(request.form.get("renewal_fee", 400)),
-        "renewal_duration": int(request.form.get("renewal_duration", 30)),
-        "default_guest_duration": int(request.form.get("default_guest_duration", 24)),
-        "max_guest_duration": int(request.form.get("max_guest_duration", 72)),
-        "guest_price_per_hour": int(request.form.get("guest_price_per_hour", 50)),
-        "facility_name": request.form.get("facility_name", "Smart Locker System"),
-        "facility_address": request.form.get("facility_address", "123 Main Street"),
-        "facility_phone": request.form.get("facility_phone", "+63 (0) 000-0000"),
-        "facility_email": request.form.get("facility_email", ""),
-        "unlock_duration": int(request.form.get("unlock_duration", 5)),
-        "rfid_timeout": int(request.form.get("rfid_timeout", 10)),
-        "fingerprint_timeout": int(request.form.get("fingerprint_timeout", 10)),
-        "max_failed_attempts": int(request.form.get("max_failed_attempts", 3)),
-        "session_timeout": int(request.form.get("session_timeout", 30)),
-        "password_min_length": int(request.form.get("password_min_length", 8)),
-        "login_attempts": int(request.form.get("login_attempts", 5)),
+    # Preserve existing settings when hidden fields are not present in the form
+    current_settings = load_settings()
+    settings_data = current_settings.copy()
+
+    settings_data.update({
+        "system_name": request.form.get("system_name", current_settings.get("system_name", "Smart Locker")),
+        "timezone": request.form.get("timezone", current_settings.get("timezone", "Asia/Manila")),
+        "currency": request.form.get("currency", current_settings.get("currency", "₱")),
+        "language": request.form.get("language", current_settings.get("language", "en")),
+        "renewal_fee": int(request.form.get("renewal_fee", current_settings.get("renewal_fee", 400))),
+        "renewal_duration": int(request.form.get("renewal_duration", current_settings.get("renewal_duration", 30))),
+        "facility_name": request.form.get("facility_name", current_settings.get("facility_name", "Smart Locker System")),
+        "facility_address": request.form.get("facility_address", current_settings.get("facility_address", "123 Main Street")),
+        "facility_phone": request.form.get("facility_phone", current_settings.get("facility_phone", "+63 (0) 000-0000")),
+        "facility_email": request.form.get("facility_email", current_settings.get("facility_email", "")),
+        "unlock_duration": int(request.form.get("unlock_duration", current_settings.get("unlock_duration", 5))),
+        "rfid_timeout": int(request.form.get("rfid_timeout", current_settings.get("rfid_timeout", 10))),
+        "fingerprint_timeout": int(request.form.get("fingerprint_timeout", current_settings.get("fingerprint_timeout", 10))),
+        "max_failed_attempts": int(request.form.get("max_failed_attempts", current_settings.get("max_failed_attempts", 3))),
+        "session_timeout": int(request.form.get("session_timeout", current_settings.get("session_timeout", 30))),
+        "password_min_length": int(request.form.get("password_min_length", current_settings.get("password_min_length", 8))),
+        "login_attempts": int(request.form.get("login_attempts", current_settings.get("login_attempts", 5))),
         "email_notifications": request.form.get("email_notifications") == "1",
         "sms_notifications": request.form.get("sms_notifications") == "1",
         "low_balance_alert": request.form.get("low_balance_alert") == "1",
-        "backup_interval": int(request.form.get("backup_interval", 24)),
-        "log_retention": int(request.form.get("log_retention", 90)),
-        "restart_time": request.form.get("restart_time", "03:00"),
-        "payment_gateway": request.form.get("payment_gateway", "none"),
-    }
+        "backup_interval": int(request.form.get("backup_interval", current_settings.get("backup_interval", 24))),
+        "log_retention": int(request.form.get("log_retention", current_settings.get("log_retention", 90))),
+        "restart_time": request.form.get("restart_time", current_settings.get("restart_time", "03:00")),
+        "payment_gateway": request.form.get("payment_gateway", current_settings.get("payment_gateway", "none")),
+    })
     
     # Save settings
     if save_settings(settings_data):
@@ -1706,6 +1791,149 @@ def admin_settings_update():
             conn.commit()
     
     return redirect(url_for("admin.admin_settings"))
+
+
+@admin_bp.post("/create")
+def admin_create_user():
+    """Create a new admin or staff user."""
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    
+    credentials = verify_admin_credentials_with_db(
+        session.get("admin_username", ""),
+        request.form.get("admin_password", "")
+    )
+    if not credentials["valid"] or credentials["role"] != "Admin":
+        return json_error("unauthorized", "Current admin password is incorrect or you lack permission.", 401)
+    
+    username = (request.form.get("username") or "").strip()
+    password = (request.form.get("password") or "").strip()
+    confirm_password = (request.form.get("confirm_password") or "").strip()
+    role = _normalize_role(request.form.get("role") or "Admin")
+    
+    # Validation
+    if not username or len(username) < 3:
+        return json_error("invalid_username", "Username must be at least 3 characters.", 400)
+    
+    if not password or len(password) < 8:
+        return json_error("invalid_password", "Password must be at least 8 characters.", 400)
+    
+    if password != confirm_password:
+        return json_error("password_mismatch", "Passwords do not match.", 400)
+    
+    if role not in ("Admin", "Staff"):
+        return json_error("invalid_role", "Invalid role. Must be Admin or Staff.", 400)
+    
+    try:
+        with connect() as conn:
+            # Check if username already exists
+            existing = conn.execute(
+                "SELECT id FROM admins WHERE username = ?",
+                (username,),
+            ).fetchone()
+            
+            if existing:
+                return json_error("username_exists", f"Username '{username}' already exists.", 409)
+            
+            # Create new admin
+            password_hash = generate_password_hash(password, method='pbkdf2:sha256')
+            conn.execute(
+                "INSERT INTO admins (username, password_hash, role, status, created_by) VALUES (?,?,?,?,?)",
+                (username, password_hash, _normalize_role(role), "active", session.get("admin_username", "system")),
+            )
+            
+            # Log the action
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                ("admin", session.get("admin_username", "system"), "admin_created", f"username={username}; role={role}"),
+            )
+            conn.commit()
+        
+        return json_success({
+            "status": "created",
+            "username": username,
+            "role": role,
+            "message": f"Admin user '{username}' created successfully"
+        }, 201)
+    except Exception as e:
+        error_msg = f"Failed to create admin user: {str(e)}"
+        return json_error("server_error", error_msg, 500)
+        
+
+
+
+@admin_bp.get("/list")
+def admin_list_users():
+    """Get list of all admin users."""
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    
+    try:
+        with connect() as conn:
+            admins = conn.execute(
+                "SELECT id, username, role, status, created_at, created_by FROM admins ORDER BY created_at DESC"
+            ).fetchall()
+        
+        admin_list = [
+            {
+                "id": admin["id"],
+                "username": admin["username"],
+                "role": admin["role"],
+                "status": admin["status"],
+                "created_at": admin["created_at"],
+                "created_by": admin["created_by"],
+            }
+            for admin in admins
+        ]
+        return json_success({"admins": admin_list})
+    except Exception as e:
+        error_msg = f"Failed to retrieve admins: {str(e)}"
+        return json_error("server_error", error_msg, 500)
+
+
+@admin_bp.post("/<int:admin_id>/delete")
+def admin_delete_user(admin_id: int):
+    """Delete an admin user."""
+    guard = _require_admin()
+    if guard is not None:
+        return guard
+    
+    credentials = verify_admin_credentials_with_db(
+        session.get("admin_username", ""),
+        request.form.get("admin_password", "")
+    )
+    if not credentials["valid"] or credentials["role"] != "Admin":
+        return json_error("unauthorized", "Current admin password is incorrect or you lack permission.", 401)
+    
+    try:
+        with connect() as conn:
+            admin = conn.execute(
+                "SELECT username FROM admins WHERE id = ?",
+                (admin_id,),
+            ).fetchone()
+            
+            if not admin:
+                return json_error("not_found", "Admin user not found.", 404)
+            
+            # Delete admin
+            conn.execute("DELETE FROM admins WHERE id = ?", (admin_id,))
+            
+            # Log the action
+            conn.execute(
+                "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
+                ("admin", session.get("admin_username", "system"), "admin_deleted", f"username={admin['username']}"),
+            )
+            conn.commit()
+        
+        return json_success({
+            "status": "deleted",
+            "username": admin['username'],
+            "message": f"Admin user '{admin['username']}' deleted successfully"
+        }, 200)
+    except Exception as e:
+        return json_error("server_error", f"Failed to delete admin user: {str(e)}", 500)
 
 
 @admin_bp.get("/reports")

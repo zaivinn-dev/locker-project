@@ -46,7 +46,7 @@
           </svg>
         </div>
         <h1 style="margin:0 0 8px 0; font-size:24px; font-weight:800; color:#0f6e56;">Access Granted</h1>
-        <p style="margin:0; font-size:14px; color:#7a8fa6;">Access Granted</p>
+        <p style="margin:0; font-size:14px; color:#7a8fa6;">Fingerprint authenticated successfully</p>
 
         <div style="background:#e0f5e1; border: 1px solid #0f6e56; border-radius:12px; padding:1.5rem; margin:1.5rem 0; text-align:center;">
           <div style="font-size:16px; font-weight:700; color:#0f6e56; margin-bottom:8px;">
@@ -93,8 +93,8 @@
             <path d="M16 2C8.3 2 2 8.3 2 16s6.3 14 14 14 14-6.3 14-14S23.7 2 16 2zm-1 11h2v6h-2zm0-8h2v2h-2z" fill="#dc2626"/>
           </svg>
         </div>
-        <h1 id="error-title" style="margin:0 0 8px 0; font-size:24px; font-weight:800; color:#dc2626;">Access Denied</h1>
-        <p id="error-message" style="margin:0; font-size:14px; color:#7a8fa6;">Your fingerprint was not recognized</p>
+        <h1 style="margin:0 0 8px 0; font-size:24px; font-weight:800; color:#dc2626;">Access Denied</h1>
+        <p style="margin:0; font-size:14px; color:#7a8fa6;">Your fingerprint was not recognized</p>
         <div style="font-size:11px; color:#dc2626; margin:8px 0; font-weight:600;">
           Auto-retrying in 5 seconds...
         </div>
@@ -326,25 +326,6 @@ document.addEventListener('DOMContentLoaded', function() {
         scanningState.style.display = 'none';
         successState.style.display = 'none';
         errorState.style.display = 'block';
-        
-        // Update error message based on denial reason
-        const errorTitle = document.getElementById('error-title');
-        const errorMessage = document.getElementById('error-message');
-        
-        if (data.denial_reason === 'unrecognized') {
-          errorTitle.textContent = 'Access Denied';
-          errorMessage.textContent = 'Your fingerprint is not recognized';
-        } else if (data.denial_reason === 'expired') {
-          errorTitle.textContent = 'Access Denied';
-          errorMessage.textContent = 'Access Denied';
-        } else if (data.denial_reason === 'inactive') {
-          errorTitle.textContent = 'Access Denied';
-          errorMessage.textContent = 'Access Denied';
-        } else {
-          // Default/fallback
-          errorTitle.textContent = 'Access Denied';
-          errorMessage.textContent = 'Your fingerprint was not recognized';
-        }
         return;
       }
 

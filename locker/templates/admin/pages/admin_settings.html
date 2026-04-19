@@ -355,6 +355,164 @@
 </style>
 
 <script>
+  function validateAdminForm(event) {
+    event.preventDefault();
+    
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('new_password').value;
+    const confirmPassword = document.getElementById('confirm_password').value;
+    const adminPassword = document.getElementById('admin_password_create').value;
+    const role = document.getElementById('role').value;
+    
+    // Validate input
+    if (!username || username.length < 3) {
+      alert('Username must be at least 3 characters.');
+      return false;
+    }
+    
+    if (password !== confirmPassword) {
+      alert('Passwords do not match!');
+      return false;
+    }
+    
+    if (password.length < 8) {
+      alert('Password must be at least 8 characters long.');
+      return false;
+    }
+    
+    if (!adminPassword) {
+      alert('Current admin password is required.');
+      return false;
+    }
+    
+    // Submit via AJAX
+    const formData = new FormData();
+    formData.append('username', username);
+    formData.append('password', password);
+    formData.append('confirm_password', confirmPassword);
+    formData.append('admin_password', adminPassword);
+    formData.append('role', role);
+    
+    submitAdminCreateForm(formData);
+    return false;
+  }
+
+  async function submitAdminCreateForm(formData) {
+    try {
+      const response = await fetch('{{ url_for("admin.admin_create_user") }}', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        alert('Admin user created successfully!');
+        // Reset form
+        document.getElementById('username').value = '';
+        document.getElementById('new_password').value = '';
+        document.getElementById('confirm_password').value = '';
+        document.getElementById('admin_password_create').value = '';
+        document.getElementById('role').value = 'Admin';
+        // Refresh admin list
+        loadAdminUsers();
+      } else {
+        alert('Error: ' + (data.message || data.detail || 'Failed to create admin user'));
+      }
+    } catch (error) {
+      console.error('Error creating admin user:', error);
+      alert('Error creating admin user: ' + error.message);
+    }
+  }
+
+  async function loadAdminUsers() {
+    try {
+      const response = await fetch('{{ url_for("admin.admin_list_users") }}');
+      
+      if (!response.ok) {
+        console.error('Failed to fetch admin users:', response.status, response.statusText);
+        document.getElementById('admin_users_list').innerHTML = `<div class="alert alert-warning">Error loading admins: HTTP ${response.status}</div>`;
+        return;
+      }
+      
+      const data = await response.json();
+      console.log('Admin users response:', data);
+      
+      if (!data.admins || data.admins.length === 0) {
+        document.getElementById('admin_users_list').innerHTML = '<div class="alert alert-info">No admin users yet. Use the form above to create one.</div>';
+        return;
+      }
+      
+      const admins = data.admins;
+      let html = '<div class="table-responsive"><table class="table table-sm table-striped"><thead class="table-light"><tr><th>Username</th><th>Role</th><th>Status</th><th>Created</th><th>Created By</th><th>Actions</th></tr></thead><tbody>';
+      
+      admins.forEach(admin => {
+        const createdDate = new Date(admin.created_at).toLocaleDateString();
+        html += `<tr>
+          <td>${escapeHtml(admin.username)}</td>
+          <td><span class="badge ${admin.role === 'Admin' ? 'bg-primary' : 'bg-secondary'}">${admin.role}</span></td>
+          <td><span class="badge ${admin.status === 'active' ? 'bg-success' : 'bg-danger'}">${admin.status}</span></td>
+          <td>${createdDate}</td>
+          <td>${escapeHtml(admin.created_by)}</td>
+          <td>
+            <button type="button" class="btn btn-sm btn-danger" onclick="deleteAdmin(${admin.id}, '${escapeHtml(admin.username)}')">Delete</button>
+          </td>
+        </tr>`;
+      });
+      
+      html += '</tbody></table></div>';
+      document.getElementById('admin_users_list').innerHTML = html;
+    } catch (error) {
+      console.error('Failed to load admin users:', error);
+      document.getElementById('admin_users_list').innerHTML = `<div class="alert alert-danger">Error loading admin users: ${error.message}</div>`;
+    }
+  }
+
+  function escapeHtml(text) {
+    const map = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+  }
+
+  async function deleteAdmin(adminId, username) {
+    if (!confirm(`Are you sure you want to delete admin user "${username}"? This cannot be undone.`)) {
+      return;
+    }
+    
+    const password = prompt('Enter your admin password to confirm deletion:');
+    if (!password) {
+      return;
+    }
+    
+    try {
+      const formData = new FormData();
+      formData.append('admin_password', password);
+      
+      const response = await fetch(`{{ url_for('admin.admin_delete_user', admin_id=0) }}`.replace('/0', '/' + adminId), {
+        method: 'POST',
+        body: formData
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok) {
+        alert('Admin user deleted successfully!');
+        // Refresh admin list
+        loadAdminUsers();
+      } else {
+        alert('Error: ' + (data.message || data.detail || 'Failed to delete admin user'));
+      }
+    } catch (error) {
+      console.error('Error deleting admin user:', error);
+      alert('Error deleting admin user: ' + error.message);
+    }
+  }
+
   function switchTab(event, tabName) {
     document.querySelectorAll('.settings-section').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.settings-tab').forEach(el => el.classList.remove('active'));
@@ -363,10 +521,15 @@
       event.target.classList.add('active');
     }
     localStorage.setItem('adminSettingsTab', tabName);
+    
+    // Load admin users when switching to admin_users tab
+    if (tabName === 'admin_users') {
+      loadAdminUsers();
+    }
   }
 
   document.addEventListener('DOMContentLoaded', function() {
-    const savedTab = localStorage.getItem('adminSettingsTab') ; 'general';
+    const savedTab = localStorage.getItem('adminSettingsTab') || 'general';
     const activeButton = document.querySelector(`[data-tab="${savedTab}"]`);
     if (activeButton) {
       switchTab({ target: activeButton }, savedTab);
@@ -418,12 +581,13 @@
   <div class="settings-panel">
     <div class="settings-tabs">
       <button type="button" class="settings-tab" data-tab="general" onclick="switchTab(event, 'general')">System</button>
-      <button type="button" class="settings-tab" data-tab="membership" onclick="switchTab(event, 'membership')">Membership</button>
-      <button type="button" class="settings-tab" data-tab="guest" onclick="switchTab(event, 'guest')">Guest</button>
       <button type="button" class="settings-tab" data-tab="facility" onclick="switchTab(event, 'facility')">Facility</button>
       <button type="button" class="settings-tab" data-tab="locker" onclick="switchTab(event, 'locker')">Locker</button>
+      <button type="button" class="settings-tab" data-tab="admin_users" onclick="switchTab(event, 'admin_users')">Admin Users</button>
       <button type="button" class="settings-tab" data-tab="security" onclick="switchTab(event, 'security')">Security</button>
+      {% if can_access_maintenance %}
       <button type="button" class="settings-tab" data-tab="maintenance" onclick="switchTab(event, 'maintenance')">Maintenance</button>
+      {% endif %}
     </div>
 
     <div class="settings-body">
@@ -512,67 +676,6 @@
 
           <div class="button-row">
             <button type="submit" class="btn btn-primary">Save System Settings</button>
-            <button type="reset" class="btn btn-secondary">Reset Fields</button>
-          </div>
-        </section>
-
-        <section id="membership" class="settings-section">
-          <div class="card-block">
-            <h2>Membership Settings</h2>
-            <p>Control registration fees, membership duration, and renewal pricing.</p>
-            <div class="settings-grid">
-              <div class="form-group">
-                <label class="form-label" for="membership_fee">Initial Fee</label>
-                <input id="membership_fee" name="membership_fee" type="number" class="form-control" value="{{ settings.get('membership_fee', 400) }}" min="0" step="50" />
-                <small class="form-hint">Amount charged when a member registers.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="membership_duration">Membership Duration</label>
-                <input id="membership_duration" name="membership_duration" type="number" class="form-control" value="{{ settings.get('membership_duration', 30) }}" min="1" />
-                <small class="form-hint">Days of membership validity.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="renewal_fee">Renewal Fee</label>
-                <input id="renewal_fee" name="renewal_fee" type="number" class="form-control" value="{{ settings.get('renewal_fee', 400) }}" min="0" step="50" />
-                <small class="form-hint">Amount charged when renewing a membership.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="renewal_duration">Renewal Period</label>
-                <input id="renewal_duration" name="renewal_duration" type="number" class="form-control" value="{{ settings.get('renewal_duration', 30) }}" min="1" />
-                <small class="form-hint">Days added when the member renews.</small>
-              </div>
-            </div>
-          </div>
-          <div class="button-row">
-            <button type="submit" class="btn btn-primary">Save Membership Settings</button>
-            <button type="reset" class="btn btn-secondary">Reset Fields</button>
-          </div>
-        </section>
-
-        <section id="guest" class="settings-section">
-          <div class="card-block">
-            <h2>Guest Access</h2>
-            <p>Manage guest pass duration and hourly pricing for locker usage.</p>
-            <div class="settings-grid">
-              <div class="form-group">
-                <label class="form-label" for="default_guest_duration">Default Duration</label>
-                <input id="default_guest_duration" name="default_guest_duration" type="number" class="form-control" value="{{ settings.get('default_guest_duration', 24) }}" min="1" max="720" />
-                <small class="form-hint">Default guest access duration in hours.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="max_guest_duration">Maximum Duration</label>
-                <input id="max_guest_duration" name="max_guest_duration" type="number" class="form-control" value="{{ settings.get('max_guest_duration', 72) }}" min="1" max="2160" />
-                <small class="form-hint">Maximum allowed guest access duration.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="guest_price_per_hour">Price per Hour</label>
-                <input id="guest_price_per_hour" name="guest_price_per_hour" type="number" class="form-control" value="{{ settings.get('guest_price_per_hour', 50) }}" min="0" step="10" />
-                <small class="form-hint">Guest hourly pricing amount.</small>
-              </div>
-            </div>
-          </div>
-          <div class="button-row">
-            <button type="submit" class="btn btn-primary">Save Guest Settings</button>
             <button type="reset" class="btn btn-secondary">Reset Fields</button>
           </div>
         </section>
@@ -680,6 +783,58 @@
           </div>
         </section>
 
+      </form>
+
+        <section id="admin_users" class="settings-section">
+          <div class="card-block">
+            <h2>Create Admin User</h2>
+            <p>Add new admin or staff members with restricted permissions. Requires current admin password for security.</p>
+            <form method="POST" action="{{ url_for('admin.admin_create_user') }}" onsubmit="return validateAdminForm(event)" id="createAdminForm">
+              <div class="settings-grid">
+                <div class="form-group">
+                  <label class="form-label" for="username">Username</label>
+                  <input id="username" name="username" type="text" class="form-control" placeholder="Enter username" required minlength="3" maxlength="50" />
+                  <small class="form-hint">Minimum 3 characters, alphanumeric characters recommended.</small>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="role">Role</label>
+                  <select id="role" name="role" class="form-control" required>
+                    <option value="Admin">Admin (full permissions)</option>
+                    <option value="Staff">Staff (limited permissions)</option>
+                  </select>
+                  <small class="form-hint">Admin has full system access, Staff has restricted access.</small>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="new_password">Password</label>
+                  <input id="new_password" name="password" type="password" class="form-control" placeholder="Enter password" required minlength="8" maxlength="100" autocomplete="new-password" />
+                  <small class="form-hint">Minimum 8 characters, use mix of uppercase, lowercase, numbers.</small>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="confirm_password">Confirm Password</label>
+                  <input id="confirm_password" name="confirm_password" type="password" class="form-control" placeholder="Re-enter password" required minlength="8" maxlength="100" autocomplete="new-password" />
+                  <small class="form-hint">Must match password field exactly.</small>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="admin_password_create">Current Admin Password</label>
+                  <input id="admin_password_create" name="admin_password" type="password" class="form-control" placeholder="Enter your admin password" autocomplete="current-password" required />
+                  <small class="form-hint">Required to create new admin accounts for security.</small>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary">Create Admin User</button>
+            </form>
+          </div>
+
+          <div class="card-block">
+            <h2>Manage Admin Users</h2>
+            <p>List of all admin and staff users in the system.</p>
+            <div id="admin_users_list">
+              <div class="form-hint">Loading admin users...</div>
+            </div>
+          </div>
+        </section>
+
+      </form>
+
         <section id="security" class="settings-section">
           <div class="card-block">
             <h2>Security Settings</h2>
@@ -722,11 +877,18 @@
             </div>
           </div>
 
+          {% if can_access_maintenance %}
           <div class="card-block">
             <h2>Master Unlock</h2>
             <p>This action unlocks every locker immediately. Use only during an emergency or supervised maintenance event.</p>
             <button type="button" class="btn btn-danger" onclick="showUnlockModal()">Open Master Unlock</button>
           </div>
+          {% else %}
+          <div class="card-block">
+            <h2>Master Unlock</h2>
+            <p class="text-muted">Master unlock is restricted to Admin users only.</p>
+          </div>
+          {% endif %}
 
           <div class="button-row">
             <button type="submit" class="btn btn-primary">Save Security Settings</button>
@@ -737,6 +899,7 @@
       </form>
 
       <section id="maintenance" class="settings-section">
+        {% if can_access_maintenance %}
         <div class="maintenance-grid">
           <div class="maintenance-card">
             <h3>Reset All Data</h3>
@@ -758,6 +921,12 @@
             </form>
           </div>
         </div>
+        {% else %}
+        <div class="card-block">
+          <h2>Maintenance</h2>
+          <p class="text-warning">Maintenance controls are restricted to Admin users. Staff users cannot perform reset, unlock, or fingerprint maintenance actions.</p>
+        </div>
+        {% endif %}
       </section>
     </div>
   </div>
