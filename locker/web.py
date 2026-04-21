@@ -137,7 +137,8 @@ def create_app() -> Flask:
         """Find ACTIVE guest card access for the given RFID."""
         with connect() as conn:
             card = conn.execute(
-                """SELECT grc.*, m.id as guest_id, m.full_name, m.locker_id, m.expiry_date
+                """SELECT grc.*, m.id as guest_id, m.full_name, m.expiry_date,
+                          COALESCE(grc.locker_id, m.locker_id) as locker_id
                    FROM guest_rfid_cards grc
                    JOIN members m ON grc.guest_id = m.id
                    WHERE grc.rfid_uid = ?
@@ -167,7 +168,8 @@ def create_app() -> Flask:
         """Find any guest RFID card record regardless of current status."""
         with connect() as conn:
             card = conn.execute(
-                """SELECT grc.*, m.id as guest_id, m.full_name, m.locker_id, m.expiry_date
+                """SELECT grc.*, m.id as guest_id, m.full_name, m.expiry_date,
+                          COALESCE(grc.locker_id, m.locker_id) as locker_id
                    FROM guest_rfid_cards grc
                    JOIN members m ON grc.guest_id = m.id
                    WHERE grc.rfid_uid = ?

@@ -71,33 +71,49 @@ class ESP32DeviceController:
 
     def _request(self, method: str, path: str, payload: dict | None = None) -> dict:
         last_error = None
-        for base_url in self.device_urls:
+        last_url_attempted = None
+        for idx, base_url in enumerate(self.device_urls, 1):
             url = f"{base_url}{path}"
+            last_url_attempted = url
             try:
-                logger.info(f"[ESP32] Attempting {method} {url}")
+                logger.info(f"[ESP32] ({idx}/{len(self.device_urls)}) Attempting {method} {url} (timeout: {self.connect_timeout}s connect, {self.timeout}s read)")
                 if method == "POST":
-                    logger.debug(f"[ESP32] POST {url} payload={payload}")
+                    logger.debug(f"[ESP32] POST payload={payload}")
                     r = self.session.post(url, json=payload or {}, timeout=(self.connect_timeout, self.timeout))
                 else:
-                    logger.info(f"[ESP32] GET {url}")
                     r = self.session.get(url, timeout=(self.connect_timeout, self.timeout))
 
                 r.raise_for_status()
                 logger.info(f"[ESP32] ✓ Success {r.status_code} from {url}")
                 return r.json()
             except requests.exceptions.HTTPError as e:
-                logger.error(f"[ESP32] ✗ HTTP ERROR contacting {url}: {r.status_code} {r.reason}")
+                logger.error(f"[ESP32] ✗ HTTP ERROR from {url}: {r.status_code} {r.reason}")
                 last_error = e
                 if r.status_code == 404:
                     continue
                 raise
-            except requests.exceptions.Timeout as e:
-                logger.error(f"[ESP32] ✗ TIMEOUT contacting {url}: connect={self.connect_timeout}s, read={self.timeout}s")
+            except requests.exceptions.ConnectTimeout as e:
+                logger.error(f"[ESP32] ✗ CONNECTION TIMEOUT to {url} ({self.connect_timeout}s)")
+                logger.error(f"[ESP32]    → ESP32 may be powered off, unreachable, or not running HTTP server")
+                logger.error(f"[ESP32]    → If IP changed, update ESP32_BASE_URL in .env file")
+                last_error = e
+                continue
+            except requests.exceptions.ReadTimeout as e:
+                logger.error(f"[ESP32] ✗ READ TIMEOUT from {url} ({self.timeout}s)")
+                logger.error(f"[ESP32]    → ESP32 is reachable but not responding in time")
+                logger.error(f"[ESP32]    → Try increasing ESP32_TIMEOUT in .env file")
                 last_error = e
                 continue
             except requests.exceptions.ConnectionError as e:
-                logger.error(f"[ESP32] ✗ CONNECTION ERROR contacting {url}: {str(e)}")
-                logger.info(f"[ESP32] Check if device is powered on and network reachable from this machine")
+                logger.error(f"[ESP32] ✗ CONNECTION ERROR to {url}")
+                logger.error(f"[ESP32]    → ESP32 is unreachable on the network")
+                logger.error(f"[ESP32]    → Actions to take:")
+                logger.error(f"[ESP32]       1. Verify ESP32 is powered on and booted")
+                logger.error(f"[ESP32]       2. Confirm ESP32 is connected to the correct WiFi network")
+                logger.error(f"[ESP32]       3. Get ESP32's actual IP address from WiFi router or serial monitor")
+                logger.error(f"[ESP32]       4. Update ESP32_BASE_URL and ESP32_FALLBACK_URLS in .env")
+                logger.error(f"[ESP32]       5. Restart the backend server after updating .env")
+                logger.error(f"[ESP32]    → Error details: {str(e)}")
                 last_error = e
                 continue
             except Exception as e:
@@ -106,9 +122,11 @@ class ESP32DeviceController:
                 continue
 
         if last_error:
-            logger.error(f"[ESP32] ✗ All URLs failed. Last error: {type(last_error).__name__}: {last_error}")
+            logger.critical(f"[ESP32] ✗✗✗ ALL CONNECTION ATTEMPTS FAILED ✗✗✗")
+            logger.critical(f"[ESP32] Tried {len(self.device_urls)} URL(s): {', '.join(self.device_urls)}")
+            logger.critical(f"[ESP32] Last error: {type(last_error).__name__}: {last_error}")
             raise last_error
-        logger.error(f"[ESP32] ✗ Failed to contact ESP32 at any configured URL: {self.device_urls}")
+        logger.critical(f"[ESP32] ✗ Failed to contact ESP32 at any configured URL: {self.device_urls}")
         raise RuntimeError(f"Failed to contact ESP32 at any configured URL: {self.device_urls}")
 
     def _post(self, path: str, payload: dict | None = None) -> dict:
