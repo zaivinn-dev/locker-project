@@ -530,9 +530,8 @@
               </label>
               <select id="category" name="category" required>
                 <option value="" {% if not form_data or not form_data.category %}selected{% endif %}>Select...</option>
-                <option value="student" {% if form_data and form_data.category == 'student' %}selected{% endif %}>Student</option>
-                <option value="adult"   {% if form_data and form_data.category == 'adult'   %}selected{% endif %}>Adult</option>
-                <option value="senior"  {% if form_data and form_data.category == 'senior'  %}selected{% endif %}>Senior</option>
+                <option value="student" {% if form_data and form_data.category == 'student' %}selected{% endif %}>Student (₱400 monthly)</option>
+                <option value="regular" {% if form_data and form_data.category == 'regular' %}selected{% endif %}>Regular (₱500 monthly)</option>
               </select>
             </div>
           </div>

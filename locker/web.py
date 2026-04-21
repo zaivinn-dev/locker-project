@@ -910,7 +910,7 @@ def create_app() -> Flask:
             elif normalized_contact != contact_number:
                 error = "Contact number may only contain digits."
 
-        valid_categories = {"student", "adult", "senior"}
+        valid_categories = {"student", "regular"}
         if not error and category not in valid_categories:
             error = "Please select a valid category."
 

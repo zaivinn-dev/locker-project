@@ -28,15 +28,15 @@ const int IR_SENSOR_PINS[4][2] = {
   {35, 21}    // Locker 4 - GPIO 21 is safe for ADC1
 };
 
-const char* WIFI_SSID = "Karla";
-const char* WIFI_PASSWORD = "walangpassword";
-const char* BACKEND_HOST = "http://192.168.100.23:5000";
-const char* BACKEND_RFID_URL = "http://192.168.100.23:5000/device/rfid";
-const char* BACKEND_IR_URL = "http://192.168.100.23:5000/device/ir-status";
-const char* BACKEND_FINGERPRINT_URL = "http://192.168.100.23:5000/device/fingerprint";
-const char* BACKEND_FINGERPRINT_ENROLL_URL = "http://192.168.100.23:5000/device/fingerprint/enroll";
-const char* BACKEND_FINGERPRINT_START_ENROLL_URL = "http://192.168.100.23:5000/device/fingerprint/start-enrollment";
-const char* BACKEND_SCAN_ENABLED_URL = "http://192.168.100.23:5000/api/access/scan-enabled";
+const char* WIFI_SSID = "Emelon Wifi";
+const char* WIFI_PASSWORD = "emelonwifi123";
+const char* BACKEND_HOST = "http://192.168.2.111:5000";
+const char* BACKEND_RFID_URL = "http://192.168.2.111:5000/device/rfid";
+const char* BACKEND_IR_URL = "http://192.168.2.111:5000/device/ir-status";
+const char* BACKEND_FINGERPRINT_URL = "http://192.168.2.111:5000/device/fingerprint";
+const char* BACKEND_FINGERPRINT_ENROLL_URL = "http://192.168.2.111:5000/device/fingerprint/enroll";
+const char* BACKEND_FINGERPRINT_START_ENROLL_URL = "http://192.168.2.111:5000/device/fingerprint/start-enrollment";
+const char* BACKEND_SCAN_ENABLED_URL = "http://192.168.2.111:5000/api/access/scan-enabled";
 const unsigned long FINGERPRINT_POLL_INTERVAL = 100; // Poll fingerprint sensor every 100ms (faster response)
 const int FINGERPRINT_RX_PIN = 16;
 const int FINGERPRINT_TX_PIN = 17;
@@ -68,7 +68,7 @@ bool beginBackendRequest(HTTPClient &http, const char *url, int timeoutMs) {
   }
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
-  return true;
+  return true;192.168.100.23:5000
 }
 
 int postJsonPayload(const char *url, const String &payload, String &response, int timeoutMs = 2000) {

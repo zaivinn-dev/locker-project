@@ -49,10 +49,6 @@ DEFAULT_SETTINGS = {
     "facility_address": "123 Main Street",
     "facility_phone": "+63 (0) 000-0000",
     "facility_email": "info@smartlocker.com",
-    "unlock_duration": 5,
-    "rfid_timeout": 10,
-    "fingerprint_timeout": 10,
-    "max_failed_attempts": 3,
     "password_min_length": 8,
     "login_attempts": 5,
     "email_notifications": False,
@@ -621,7 +617,7 @@ def admin_approve_member(member_id: int):
     with connect() as conn:
         # Get the member's selected locker
         member = conn.execute(
-            "SELECT locker_id FROM members WHERE id = ?",
+            "SELECT locker_id, category FROM members WHERE id = ?",
             (member_id,),
         ).fetchone()
         
@@ -629,6 +625,7 @@ def admin_approve_member(member_id: int):
             return redirect(url_for("admin_pending_approvals"))
         
         locker_id = member["locker_id"]
+        fee = 400 if member["category"] == "student" else 500
         
         # Verify the selected locker is still available (not assigned to another member)
         if locker_id:
@@ -664,7 +661,7 @@ def admin_approve_member(member_id: int):
         # Record initial payment
         conn.execute(
             "INSERT INTO payments (member_id, amount, payment_type, notes) VALUES (?, ?, ?, ?)",
-            (member_id, 400, "initial", "Member approval and initial payment"),
+            (member_id, fee, "initial", "Member approval and initial payment"),
         )
         conn.execute(
             "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
@@ -706,6 +703,11 @@ def admin_mark_paid(member_id: int):
     if guard is not None:
         return guard
     with connect() as conn:
+        member = conn.execute("SELECT category FROM members WHERE id = ?", (member_id,)).fetchone()
+        if not member:
+            return redirect(url_for("admin.admin_pending"))
+        fee = 400 if member["category"] == "student" else 500
+        
         conn.execute(
             "UPDATE members SET payment_status = 'paid', paid_at = datetime('now') WHERE id = ?",
             (member_id,),
@@ -713,7 +715,7 @@ def admin_mark_paid(member_id: int):
         # Record payment
         conn.execute(
             "INSERT INTO payments (member_id, amount, payment_type, notes) VALUES (?, ?, ?, ?)",
-            (member_id, 400, "manual_payment", "Manually marked as paid"),
+            (member_id, fee, "manual_payment", "Manually marked as paid"),
         )
         conn.execute(
             "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
@@ -729,6 +731,11 @@ def admin_renew_member(member_id: int):
     if guard is not None:
         return guard
     with connect() as conn:
+        member = conn.execute("SELECT category FROM members WHERE id = ?", (member_id,)).fetchone()
+        if not member:
+            return redirect(url_for("admin.admin_members"))
+        fee = 400 if member["category"] == "student" else 500
+        
         # Extend membership by 30 days from now
         expiry_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
         conn.execute(
@@ -738,7 +745,7 @@ def admin_renew_member(member_id: int):
         # Record renewal payment
         conn.execute(
             "INSERT INTO payments (member_id, amount, payment_type, notes) VALUES (?, ?, ?, ?)",
-            (member_id, 400, "renewal", f"Membership renewal - expires {expiry_date}"),
+            (member_id, fee, "renewal", f"Membership renewal - expires {expiry_date}"),
         )
         conn.execute(
             "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
@@ -761,6 +768,7 @@ def admin_delete_member(member_id: int):
         ).fetchone()
         if member:
             locker_id = member["locker_id"]
+        fee = 400 if member["category"] == "student" else 500
             fingerprint_uid = member["fingerprint_uid"]
             rfid_uid = member["rfid_uid"]
 
@@ -1443,7 +1451,7 @@ def admin_create_guest():
 
                     # Preserve the old guest record for history, but clear its active RFID and locker mapping.
                     old_locker_id = conn.execute(
-                        "SELECT locker_id FROM members WHERE id = ?",
+                        "SELECT locker_id, category FROM members WHERE id = ?",
                         (existing["id"],),
                     ).fetchone()
                     if old_locker_id and old_locker_id["locker_id"]:
@@ -1752,10 +1760,6 @@ def admin_settings_update():
         "facility_address": request.form.get("facility_address", current_settings.get("facility_address", "123 Main Street")),
         "facility_phone": request.form.get("facility_phone", current_settings.get("facility_phone", "+63 (0) 000-0000")),
         "facility_email": request.form.get("facility_email", current_settings.get("facility_email", "")),
-        "unlock_duration": int(request.form.get("unlock_duration", current_settings.get("unlock_duration", 5))),
-        "rfid_timeout": int(request.form.get("rfid_timeout", current_settings.get("rfid_timeout", 10))),
-        "fingerprint_timeout": int(request.form.get("fingerprint_timeout", current_settings.get("fingerprint_timeout", 10))),
-        "max_failed_attempts": int(request.form.get("max_failed_attempts", current_settings.get("max_failed_attempts", 3))),
         "password_min_length": int(request.form.get("password_min_length", current_settings.get("password_min_length", 8))),
         "login_attempts": int(request.form.get("login_attempts", current_settings.get("login_attempts", 5))),
         "email_notifications": request.form.get("email_notifications") == "1",
@@ -1781,6 +1785,9 @@ def admin_create_user():
     guard = _require_admin()
     if guard is not None:
         return guard
+        
+    if session.get("admin_role") != "Admin":
+        return json_error("unauthorized", "Access denied: Only Admin users can create new users.", 403)
     
     credentials = verify_admin_credentials_with_db(
         session.get("admin_username", ""),
@@ -2396,9 +2403,9 @@ def export_access_logs_pdf():
     return response
 
 
-@admin_bp.get("/admin-activity")
-def admin_activity():
-    """View admin actions and system activity."""
+@admin_bp.get("/admin-management")
+def admin_management():
+    """View and manage admin users and system activity."""
     guard = _require_admin()
     if guard is not None:
         return guard
@@ -2441,8 +2448,8 @@ def admin_activity():
         ).fetchall()
     
     return render_template(
-        "admin/pages/admin_activity.html",
-        current_page="admin_activity",
+        "admin/pages/admin_management.html",
+        current_page="admin_management",
         admin_username=session.get("admin_username"),
         logs=logs,
         actor_stats=actor_stats,

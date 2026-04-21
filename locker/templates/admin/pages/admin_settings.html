@@ -355,163 +355,6 @@
 </style>
 
 <script>
-  function validateAdminForm(event) {
-    event.preventDefault();
-    
-    const username = document.getElementById('username').value.trim();
-    const password = document.getElementById('new_password').value;
-    const confirmPassword = document.getElementById('confirm_password').value;
-    const adminPassword = document.getElementById('admin_password_create').value;
-    const role = document.getElementById('role').value;
-    
-    // Validate input
-    if (!username || username.length < 3) {
-      alert('Username must be at least 3 characters.');
-      return false;
-    }
-    
-    if (password !== confirmPassword) {
-      alert('Passwords do not match!');
-      return false;
-    }
-    
-    if (password.length < 8) {
-      alert('Password must be at least 8 characters long.');
-      return false;
-    }
-    
-    if (!adminPassword) {
-      alert('Current admin password is required.');
-      return false;
-    }
-    
-    // Submit via AJAX
-    const formData = new FormData();
-    formData.append('username', username);
-    formData.append('password', password);
-    formData.append('confirm_password', confirmPassword);
-    formData.append('admin_password', adminPassword);
-    formData.append('role', role);
-    
-    submitAdminCreateForm(formData);
-    return false;
-  }
-
-  async function submitAdminCreateForm(formData) {
-    try {
-      const response = await fetch('{{ url_for("admin.admin_create_user") }}', {
-        method: 'POST',
-        body: formData
-      });
-      
-      const data = await response.json();
-      
-      if (response.ok) {
-        alert('Admin user created successfully!');
-        // Reset form
-        document.getElementById('username').value = '';
-        document.getElementById('new_password').value = '';
-        document.getElementById('confirm_password').value = '';
-        document.getElementById('admin_password_create').value = '';
-        document.getElementById('role').value = 'Admin';
-        // Refresh admin list
-        loadAdminUsers();
-      } else {
-        alert('Error: ' + (data.message || data.detail || 'Failed to create admin user'));
-      }
-    } catch (error) {
-      console.error('Error creating admin user:', error);
-      alert('Error creating admin user: ' + error.message);
-    }
-  }
-
-  async function loadAdminUsers() {
-    try {
-      const response = await fetch('{{ url_for("admin.admin_list_users") }}');
-      
-      if (!response.ok) {
-        console.error('Failed to fetch admin users:', response.status, response.statusText);
-        document.getElementById('admin_users_list').innerHTML = `<div class="alert alert-warning">Error loading admins: HTTP ${response.status}</div>`;
-        return;
-      }
-      
-      const data = await response.json();
-      console.log('Admin users response:', data);
-      
-      if (!data.admins || data.admins.length === 0) {
-        document.getElementById('admin_users_list').innerHTML = '<div class="alert alert-info">No admin users yet. Use the form above to create one.</div>';
-        return;
-      }
-      
-      const admins = data.admins;
-      let html = '<div class="table-responsive"><table class="table table-sm table-striped"><thead class="table-light"><tr><th>Username</th><th>Role</th><th>Status</th><th>Created</th><th>Created By</th><th>Actions</th></tr></thead><tbody>';
-      
-      admins.forEach(admin => {
-        const createdDate = new Date(admin.created_at).toLocaleDateString();
-        html += `<tr>
-          <td>${escapeHtml(admin.username)}</td>
-          <td><span class="badge ${admin.role === 'Admin' ? 'bg-primary' : 'bg-secondary'}">${admin.role}</span></td>
-          <td><span class="badge ${admin.status === 'active' ? 'bg-success' : 'bg-danger'}">${admin.status}</span></td>
-          <td>${createdDate}</td>
-          <td>${escapeHtml(admin.created_by)}</td>
-          <td>
-            <button type="button" class="btn btn-sm btn-danger" onclick="deleteAdmin(${admin.id}, '${escapeHtml(admin.username)}')">Delete</button>
-          </td>
-        </tr>`;
-      });
-      
-      html += '</tbody></table></div>';
-      document.getElementById('admin_users_list').innerHTML = html;
-    } catch (error) {
-      console.error('Failed to load admin users:', error);
-      document.getElementById('admin_users_list').innerHTML = `<div class="alert alert-danger">Error loading admin users: ${error.message}</div>`;
-    }
-  }
-
-  function escapeHtml(text) {
-    const map = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;'
-    };
-    return text.replace(/[&<>"']/g, m => map[m]);
-  }
-
-  async function deleteAdmin(adminId, username) {
-    if (!confirm(`Are you sure you want to delete admin user "${username}"? This cannot be undone.`)) {
-      return;
-    }
-    
-    const password = prompt('Enter your admin password to confirm deletion:');
-    if (!password) {
-      return;
-    }
-    
-    try {
-      const formData = new FormData();
-      formData.append('admin_password', password);
-      
-      const response = await fetch(`{{ url_for('admin.admin_delete_user', admin_id=0) }}`.replace('/0', '/' + adminId), {
-        method: 'POST',
-        body: formData
-      });
-      
-      const data = await response.json();
-      
-      if (response.ok) {
-        alert('Admin user deleted successfully!');
-        // Refresh admin list
-        loadAdminUsers();
-      } else {
-        alert('Error: ' + (data.message || data.detail || 'Failed to delete admin user'));
-      }
-    } catch (error) {
-      console.error('Error deleting admin user:', error);
-      alert('Error deleting admin user: ' + error.message);
-    }
-  }
 
   function switchTab(event, tabName) {
     document.querySelectorAll('.settings-section').forEach(el => el.classList.remove('active'));
@@ -521,11 +364,7 @@
       event.target.classList.add('active');
     }
     localStorage.setItem('adminSettingsTab', tabName);
-    
-    // Load admin users when switching to admin_users tab
-    if (tabName === 'admin_users') {
-      loadAdminUsers();
-    }
+
   }
 
   document.addEventListener('DOMContentLoaded', function() {
@@ -582,12 +421,7 @@
     <div class="settings-tabs">
       <button type="button" class="settings-tab" data-tab="facility" onclick="switchTab(event, 'facility')">Facility</button>
       <button type="button" class="settings-tab" data-tab="locker" onclick="switchTab(event, 'locker')">Locker</button>
-      <button type="button" class="settings-tab" data-tab="admin_users" onclick="switchTab(event, 'admin_users')">Admin Users</button>
-      <button type="button" class="settings-tab" data-tab="security" onclick="switchTab(event, 'security')">Security</button>
-      {% if can_access_maintenance %}
-      <button type="button" class="settings-tab" data-tab="maintenance" onclick="switchTab(event, 'maintenance')">Maintenance</button>
-      {% endif %}
-    </div>
+          </div>
 
     <div class="settings-body">
       <form method="POST" action="{{ url_for('admin.admin_settings_update') }}">
@@ -663,162 +497,31 @@
                   <p class="form-hint" style="color: #b91c1c;">Device error: {{ locker.device_error }}</p>
                 {% endif %}
                 <div class="button-row">
-                  <button id="locker-{{ locker.id }}-action-lock" type="button" class="btn btn-secondary btn-small" onclick="setLockerState({{ locker.id }}, 'lock')" {% if locker.locked is true %}disabled{% endif %}>Lock</button>
-                  <button id="locker-{{ locker.id }}-action-unlock" type="button" class="btn btn-primary btn-small" onclick="setLockerState({{ locker.id }}, 'unlock')" {% if locker.locked is false %}disabled{% endif %}>Unlock</button>
+                  <button id="locker-{{ locker.id }}-action-lock" type="button" class="btn btn-secondary btn-small" onclick="setLockerState('{{ locker.id }}', 'lock')" {% if locker.locked is true %}disabled{% endif %}>Lock</button>
+                  <button id="locker-{{ locker.id }}-action-unlock" type="button" class="btn btn-primary btn-small" onclick="setLockerState('{{ locker.id }}', 'unlock')" {% if locker.locked is false %}disabled{% endif %}>Unlock</button>
                 </div>
               </div>
               {% endfor %}
             </div>
           </div>
 
-          <div class="card-block">
-            <h2>Locker Access Settings</h2>
-            <p>Fine tune locker timing, scan behavior, and access timeouts.</p>
-            <div class="settings-grid">
-              <div class="form-group">
-                <label class="form-label" for="unlock_duration">Unlock Duration</label>
-                <input id="unlock_duration" name="unlock_duration" type="number" class="form-control" value="{{ settings.get('unlock_duration', 5) }}" min="1" max="60" />
-                <small class="form-hint">Seconds a locker stays unlocked after access.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="rfid_timeout">RFID Timeout</label>
-                <input id="rfid_timeout" name="rfid_timeout" type="number" class="form-control" value="{{ settings.get('rfid_timeout', 10) }}" min="1" max="30" />
-                <small class="form-hint">Timeout for RFID scan operations.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="fingerprint_timeout">Fingerprint Timeout</label>
-                <input id="fingerprint_timeout" name="fingerprint_timeout" type="number" class="form-control" value="{{ settings.get('fingerprint_timeout', 10) }}" min="1" max="30" />
-                <small class="form-hint">Timeout for fingerprint scan operations.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="max_failed_attempts">Max Failed Attempts</label>
-                <input id="max_failed_attempts" name="max_failed_attempts" type="number" class="form-control" value="{{ settings.get('max_failed_attempts', 3) }}" min="1" max="10" />
-                <small class="form-hint">Lockout threshold for repeated failures.</small>
-              </div>
-            </div>
-          </div>
-          <div class="button-row">
-            <button type="submit" class="btn btn-primary">Save Locker Settings</button>
-            <button type="reset" class="btn btn-secondary">Reset Fields</button>
-          </div>
-        </section>
-
-      </form>
-
-        <section id="admin_users" class="settings-section">
-          <div class="card-block">
-            <h2>Create Admin User</h2>
-            <p>Add new admin or staff members with restricted permissions. Requires current admin password for security.</p>
-            <form method="POST" action="{{ url_for('admin.admin_create_user') }}" onsubmit="return validateAdminForm(event)" id="createAdminForm">
-              <div class="settings-grid">
-                <div class="form-group">
-                  <label class="form-label" for="username">Username</label>
-                  <input id="username" name="username" type="text" class="form-control" placeholder="Enter username" required minlength="3" maxlength="50" />
-                  <small class="form-hint">Minimum 3 characters, alphanumeric characters recommended.</small>
-                </div>
-                <div class="form-group">
-                  <label class="form-label" for="role">Role</label>
-                  <select id="role" name="role" class="form-control" required>
-                    <option value="Admin">Admin (full permissions)</option>
-                    <option value="Staff">Staff (limited permissions)</option>
-                  </select>
-                  <small class="form-hint">Admin has full system access, Staff has restricted access.</small>
-                </div>
-                <div class="form-group">
-                  <label class="form-label" for="new_password">Password</label>
-                  <input id="new_password" name="password" type="password" class="form-control" placeholder="Enter password" required minlength="8" maxlength="100" autocomplete="new-password" />
-                  <small class="form-hint">Minimum 8 characters, use mix of uppercase, lowercase, numbers.</small>
-                </div>
-                <div class="form-group">
-                  <label class="form-label" for="confirm_password">Confirm Password</label>
-                  <input id="confirm_password" name="confirm_password" type="password" class="form-control" placeholder="Re-enter password" required minlength="8" maxlength="100" autocomplete="new-password" />
-                  <small class="form-hint">Must match password field exactly.</small>
-                </div>
-                <div class="form-group">
-                  <label class="form-label" for="admin_password_create">Current Admin Password</label>
-                  <input id="admin_password_create" name="admin_password" type="password" class="form-control" placeholder="Enter your admin password" autocomplete="current-password" required />
-                  <small class="form-hint">Required to create new admin accounts for security.</small>
-                </div>
-              </div>
-              <button type="submit" class="btn btn-primary">Create Admin User</button>
-            </form>
-          </div>
-
-          <div class="card-block">
-            <h2>Manage Admin Users</h2>
-            <p>List of all admin and staff users in the system.</p>
-            <div id="admin_users_list">
-              <div class="form-hint">Loading admin users...</div>
-            </div>
-          </div>
-        </section>
-
-      </form>
-
-        <section id="security" class="settings-section">
-          <div class="card-block">
-            <h2>Security Settings</h2>
-            <p>Control login limits, password policy, notifications, and critical admin actions.</p>
-            <div class="settings-grid">
-              <div class="form-group">
-                <label class="form-label" for="login_attempts">Maximum Login Attempts</label>
-                <input id="login_attempts" name="login_attempts" type="number" class="form-control" value="{{ settings.get('login_attempts', 5) }}" min="1" max="10" />
-                <small class="form-hint">Allowed failed login attempts before lockout.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="password_min_length">Password Minimum Length</label>
-                <input id="password_min_length" name="password_min_length" type="number" class="form-control" value="{{ settings.get('password_min_length', 8) }}" min="6" max="32" />
-                <small class="form-hint">Minimum required characters for admin passwords.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="email_notifications">Email Notifications</label>
-                <select id="email_notifications" name="email_notifications" class="form-control">
-                  <option value="1" {% if settings.get('email_notifications') %}selected{% endif %}>Enabled</option>
-                  <option value="0" {% if not settings.get('email_notifications') %}selected{% endif %}>Disabled</option>
-                </select>
-                <small class="form-hint">Enable email alerts for system events.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="sms_notifications">SMS Notifications</label>
-                <select id="sms_notifications" name="sms_notifications" class="form-control">
-                  <option value="1" {% if settings.get('sms_notifications') %}selected{% endif %}>Enabled</option>
-                  <option value="0" {% if not settings.get('sms_notifications') %}selected{% endif %}>Disabled</option>
-                </select>
-                <small class="form-hint">Enable SMS alerts for system warnings.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="low_balance_alert">Low Balance Alerts</label>
-                <select id="low_balance_alert" name="low_balance_alert" class="form-control">
-                  <option value="1" {% if settings.get('low_balance_alert') %}selected{% endif %}>Enabled</option>
-                  <option value="0" {% if not settings.get('low_balance_alert') %}selected{% endif %}>Disabled</option>
-                </select>
-                <small class="form-hint">Trigger alerts for low balance notifications.</small>
-              </div>
-            </div>
-          </div>
-
           {% if can_access_maintenance %}
-          <div class="card-block">
+          <div class="card-block" style="margin-top: 1.5rem;">
             <h2>Master Unlock</h2>
             <p>This action unlocks every locker immediately. Use only during an emergency or supervised maintenance event.</p>
             <button type="button" class="btn btn-danger" onclick="showUnlockModal()">Open Master Unlock</button>
           </div>
           {% else %}
-          <div class="card-block">
+          <div class="card-block" style="margin-top: 1.5rem;">
             <h2>Master Unlock</h2>
             <p class="text-muted">Master unlock is restricted to Admin users only.</p>
           </div>
           {% endif %}
+      </form> <!-- End main form to prevent nested forms -->
 
-          <div class="button-row">
-            <button type="submit" class="btn btn-primary">Save Security Settings</button>
-            <button type="reset" class="btn btn-secondary">Reset Fields</button>
-          </div>
-        </section>
-
-      </form>
-
-      <section id="maintenance" class="settings-section">
+      <div class="card-block" style="margin-top: 2rem; border-color: #fecaca; background: #fffcfc;">
+        <h2 style="color: #b91c1c;">Maintenance & Danger Zone</h2>
+        <p>Advanced system controls for data reset and fingerprint management. Proceed with caution.</p>
         {% if can_access_maintenance %}
         <div class="maintenance-grid">
           <div class="maintenance-card">
@@ -842,12 +545,12 @@
           </div>
         </div>
         {% else %}
-        <div class="card-block">
-          <h2>Maintenance</h2>
-          <p class="text-warning">Maintenance controls are restricted to Admin users. Staff users cannot perform reset, unlock, or fingerprint maintenance actions.</p>
-        </div>
+        <p class="text-warning" style="margin-top: 1rem; font-weight: 500;">Maintenance controls are restricted to Admin users. Staff users cannot perform reset, unlock, or fingerprint maintenance actions.</p>
         {% endif %}
-      </section>
+      </div>
+
+        </section>
+
     </div>
   </div>
 </div>
