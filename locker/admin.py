@@ -38,10 +38,6 @@ SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
 
 # Default settings
 DEFAULT_SETTINGS = {
-    "system_name": "Smart Locker",
-    "timezone": "Asia/Manila",
-    "currency": "₱",
-    "language": "en",
     "membership_fee": 400,
     "membership_duration": 30,
     "renewal_fee": 400,
@@ -57,16 +53,11 @@ DEFAULT_SETTINGS = {
     "rfid_timeout": 10,
     "fingerprint_timeout": 10,
     "max_failed_attempts": 3,
-    "session_timeout": 30,
     "password_min_length": 8,
     "login_attempts": 5,
     "email_notifications": False,
     "sms_notifications": False,
     "low_balance_alert": True,
-    "backup_interval": 24,
-    "log_retention": 90,
-    "restart_time": "03:00",
-    "payment_gateway": "none",
 }
 
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
@@ -1755,10 +1746,6 @@ def admin_settings_update():
     settings_data = current_settings.copy()
 
     settings_data.update({
-        "system_name": request.form.get("system_name", current_settings.get("system_name", "Smart Locker")),
-        "timezone": request.form.get("timezone", current_settings.get("timezone", "Asia/Manila")),
-        "currency": request.form.get("currency", current_settings.get("currency", "₱")),
-        "language": request.form.get("language", current_settings.get("language", "en")),
         "renewal_fee": int(request.form.get("renewal_fee", current_settings.get("renewal_fee", 400))),
         "renewal_duration": int(request.form.get("renewal_duration", current_settings.get("renewal_duration", 30))),
         "facility_name": request.form.get("facility_name", current_settings.get("facility_name", "Smart Locker System")),
@@ -1769,16 +1756,11 @@ def admin_settings_update():
         "rfid_timeout": int(request.form.get("rfid_timeout", current_settings.get("rfid_timeout", 10))),
         "fingerprint_timeout": int(request.form.get("fingerprint_timeout", current_settings.get("fingerprint_timeout", 10))),
         "max_failed_attempts": int(request.form.get("max_failed_attempts", current_settings.get("max_failed_attempts", 3))),
-        "session_timeout": int(request.form.get("session_timeout", current_settings.get("session_timeout", 30))),
         "password_min_length": int(request.form.get("password_min_length", current_settings.get("password_min_length", 8))),
         "login_attempts": int(request.form.get("login_attempts", current_settings.get("login_attempts", 5))),
         "email_notifications": request.form.get("email_notifications") == "1",
         "sms_notifications": request.form.get("sms_notifications") == "1",
         "low_balance_alert": request.form.get("low_balance_alert") == "1",
-        "backup_interval": int(request.form.get("backup_interval", current_settings.get("backup_interval", 24))),
-        "log_retention": int(request.form.get("log_retention", current_settings.get("log_retention", 90))),
-        "restart_time": request.form.get("restart_time", current_settings.get("restart_time", "03:00")),
-        "payment_gateway": request.form.get("payment_gateway", current_settings.get("payment_gateway", "none")),
     })
     
     # Save settings

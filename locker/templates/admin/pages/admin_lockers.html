@@ -216,17 +216,17 @@
                     <span class="locker-label">Status</span>
                     <span class="locker-value">Assigned</span>
                   </div>
-                  {% endif %}
                   <div class="locker-info-row">
                     <span class="locker-label">Locker contents</span>
                     <span class="locker-value">
-                      {% if locker.type == 'guest' and locker.status == 'occupied' %}
+                      {% if locker.status == 'occupied' %}
                         Occupied
                       {% else %}
                         Empty
                       {% endif %}
                     </span>
                   </div>
+                  {% endif %}
                   {% if locker.assigned_to.type == 'member' %}
                   <div class="locker-info-row">
                     <span class="locker-label">Status</span>

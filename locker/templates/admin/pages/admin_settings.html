@@ -580,7 +580,6 @@
 
   <div class="settings-panel">
     <div class="settings-tabs">
-      <button type="button" class="settings-tab" data-tab="general" onclick="switchTab(event, 'general')">System</button>
       <button type="button" class="settings-tab" data-tab="facility" onclick="switchTab(event, 'facility')">Facility</button>
       <button type="button" class="settings-tab" data-tab="locker" onclick="switchTab(event, 'locker')">Locker</button>
       <button type="button" class="settings-tab" data-tab="admin_users" onclick="switchTab(event, 'admin_users')">Admin Users</button>
@@ -600,85 +599,6 @@
             {% endfor %}
           {% endif %}
         {% endwith %}
-
-        <section id="general" class="settings-section">
-          <div class="card-block">
-            <h2>System Settings</h2>
-            <p>Update system display settings, timezone, and currency used across the platform.</p>
-            <div class="settings-grid">
-              <div class="form-group">
-                <label class="form-label" for="system_name">System Name</label>
-                <input id="system_name" name="system_name" class="form-control" value="{{ settings.get('system_name', 'Smart Locker') }}" placeholder="Smart Locker" maxlength="100" />
-                <small class="form-hint">Facility name shown on admin screens and reports.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="timezone">Timezone</label>
-                <select id="timezone" name="timezone" class="form-control">
-                  <option value="Asia/Manila" {% if settings.get('timezone') == 'Asia/Manila' %}selected{% endif %}>Philippine Time (GMT+8)</option>
-                  <option value="Asia/Bangkok" {% if settings.get('timezone') == 'Asia/Bangkok' %}selected{% endif %}>Bangkok (GMT+7)</option>
-                  <option value="UTC" {% if settings.get('timezone') == 'UTC' %}selected{% endif %}>UTC</option>
-                </select>
-                <small class="form-hint">Used for timestamps and scheduled actions.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="currency">Currency Symbol</label>
-                <input id="currency" name="currency" class="form-control" value="{{ settings.get('currency', '₱') }}" placeholder="₱" maxlength="5" />
-                <small class="form-hint">Symbol used for all pricing and payments.</small>
-              </div>
-            </div>
-          </div>
-
-          <div class="card-block">
-            <h2>Advanced System</h2>
-            <p>Preserve and adjust lower-level settings for language, sessions, backups, and logging.</p>
-            <div class="settings-grid">
-              <div class="form-group">
-                <label class="form-label" for="language">Language</label>
-                <select id="language" name="language" class="form-control">
-                  <option value="en" {% if settings.get('language') == 'en' %}selected{% endif %}>English</option>
-                  <option value="ph" {% if settings.get('language') == 'ph' %}selected{% endif %}>Filipino</option>
-                  <option value="es" {% if settings.get('language') == 'es' %}selected{% endif %}>Spanish</option>
-                </select>
-                <small class="form-hint">Interface language for the admin panel.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="session_timeout">Session Timeout</label>
-                <input id="session_timeout" name="session_timeout" type="number" class="form-control" value="{{ settings.get('session_timeout', 30) }}" min="1" />
-                <small class="form-hint">Minutes until admin session expires.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="backup_interval">Backup Interval</label>
-                <input id="backup_interval" name="backup_interval" type="number" class="form-control" value="{{ settings.get('backup_interval', 24) }}" min="1" />
-                <small class="form-hint">Hours between automatic backups.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="log_retention">Log Retention</label>
-                <input id="log_retention" name="log_retention" type="number" class="form-control" value="{{ settings.get('log_retention', 90) }}" min="1" />
-                <small class="form-hint">Days to keep access logs.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="restart_time">Restart Time</label>
-                <input id="restart_time" name="restart_time" type="time" class="form-control" value="{{ settings.get('restart_time', '03:00') }}" />
-                <small class="form-hint">Scheduled daily restart time.</small>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="payment_gateway">Payment Gateway</label>
-                <select id="payment_gateway" name="payment_gateway" class="form-control">
-                  <option value="none" {% if settings.get('payment_gateway') == 'none' %}selected{% endif %}>None</option>
-                  <option value="stripe" {% if settings.get('payment_gateway') == 'stripe' %}selected{% endif %}>Stripe</option>
-                  <option value="payu" {% if settings.get('payment_gateway') == 'payu' %}selected{% endif %}>PayU</option>
-                  <option value="paypal" {% if settings.get('payment_gateway') == 'paypal' %}selected{% endif %}>PayPal</option>
-                </select>
-                <small class="form-hint">Gateway used for online payments.</small>
-              </div>
-            </div>
-          </div>
-
-          <div class="button-row">
-            <button type="submit" class="btn btn-primary">Save System Settings</button>
-            <button type="reset" class="btn btn-secondary">Reset Fields</button>
-          </div>
-        </section>
 
         <section id="facility" class="settings-section">
           <div class="card-block">
