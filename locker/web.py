@@ -1602,31 +1602,62 @@ def create_app() -> Flask:
 
     @app.get("/api/admin/guest-list")
     def admin_guest_list():
-        """Return current active guest records for card issuance."""
+        """Return guest records with latest card/locker assignment."""
         q = (request.args.get("q") or "").strip()
-        now = datetime.now().isoformat()
         with connect() as conn:
             if q:
                 guests = conn.execute(
-                    """
-                    SELECT id, full_name, locker_id, rfid_uid, expiry_date
-                    FROM members
-                    WHERE member_type = 'guest'
-                      AND (full_name LIKE ? OR CAST(id AS TEXT) LIKE ? OR rfid_uid LIKE ?)
-                    ORDER BY full_name ASC
+                    '''
+                    SELECT m.id, m.full_name,
+                        (
+                            SELECT grc.rfid_uid FROM guest_rfid_cards grc
+                            WHERE grc.guest_id = m.id
+                            ORDER BY grc.issue_time DESC, grc.id DESC LIMIT 1
+                        ) AS rfid_uid,
+                        (
+                            SELECT grc.locker_id FROM guest_rfid_cards grc
+                            WHERE grc.guest_id = m.id
+                            ORDER BY grc.issue_time DESC, grc.id DESC LIMIT 1
+                        ) AS locker_id,
+                        (
+                            SELECT grc.status FROM guest_rfid_cards grc
+                            WHERE grc.guest_id = m.id
+                            ORDER BY grc.issue_time DESC, grc.id DESC LIMIT 1
+                        ) AS card_status,
+                        m.expiry_date
+                    FROM members m
+                    WHERE m.member_type = 'guest'
+                      AND (m.full_name LIKE ? OR CAST(m.id AS TEXT) LIKE ?)
+                    ORDER BY m.full_name ASC
                     LIMIT 200
-                    """,
-                    (f"%{q}%", f"%{q}%", f"%{q}%"),
+                    ''',
+                    (f"%{q}%", f"%{q}%"),
                 ).fetchall()
             else:
                 guests = conn.execute(
-                    """
-                    SELECT id, full_name, locker_id, rfid_uid, expiry_date
-                    FROM members
-                    WHERE member_type = 'guest'
-                    ORDER BY full_name ASC
+                    '''
+                    SELECT m.id, m.full_name,
+                        (
+                            SELECT grc.rfid_uid FROM guest_rfid_cards grc
+                            WHERE grc.guest_id = m.id
+                            ORDER BY grc.issue_time DESC, grc.id DESC LIMIT 1
+                        ) AS rfid_uid,
+                        (
+                            SELECT grc.locker_id FROM guest_rfid_cards grc
+                            WHERE grc.guest_id = m.id
+                            ORDER BY grc.issue_time DESC, grc.id DESC LIMIT 1
+                        ) AS locker_id,
+                        (
+                            SELECT grc.status FROM guest_rfid_cards grc
+                            WHERE grc.guest_id = m.id
+                            ORDER BY grc.issue_time DESC, grc.id DESC LIMIT 1
+                        ) AS card_status,
+                        m.expiry_date
+                    FROM members m
+                    WHERE m.member_type = 'guest'
+                    ORDER BY m.full_name ASC
                     LIMIT 200
-                    """,
+                    '''
                 ).fetchall()
 
         return {"guests": [dict(g) for g in guests]}
@@ -1711,34 +1742,7 @@ def create_app() -> Flask:
             print(f"[ADMIN] {msg}")
             return {"status": "error", "error": msg}, 500
 
-    @app.get("/api/admin/card-audit-report")
-    def admin_card_audit_report():
-        """Generate daily card audit report showing missing/overdue cards."""
-        from datetime import datetime
-        
-        with connect() as conn:
-            cards_list = _load_card_audit_records(conn)
-            
-            summary = {
-                "active": sum(1 for c in cards_list if c.get("status") == "ACTIVE"),
-                "returned": sum(1 for c in cards_list if c.get("status") == "RETURNED"),
-                "lost": sum(1 for c in cards_list if c.get("status") == "LOST"),
-                "blacklisted": sum(1 for c in cards_list if c.get("status") == "BLACKLISTED"),
-                "returned_today": sum(
-                    1 for c in cards_list
-                    if c.get("actual_return_time")
-                    and datetime.fromisoformat(c["actual_return_time"]).date() == datetime.now().date()
-                ),
-            }
-            
-            report = {
-                "generated_at": datetime.now().isoformat(),
-                "total_cards": len(cards_list),
-                "cards": cards_list,
-                "summary": summary,
-            }
-        
-        return report
+
 
     @app.get("/api/admin/card-audit-history")
     def admin_card_audit_history():

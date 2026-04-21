@@ -24,8 +24,8 @@
 const int IR_SENSOR_PINS[4][2] = {
   {-1, -1},   // Locker 1 (no IR)
   {-1, -1},   // Locker 2 (no IR)
-  {37, 38},   // Locker 3
-  {39, 21}    // Locker 4 - GPIO 21 is safe for ADC1
+  {33, 34},   // Locker 3
+  {35, 21}    // Locker 4 - GPIO 21 is safe for ADC1
 };
 
 const char* WIFI_SSID = "Emelon Wifi";

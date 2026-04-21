@@ -262,25 +262,6 @@
 </nav>
 
 <main class="als-main" style="align-items:center; padding: 2.5rem 1.5rem;">
-  <div style="width:100%; max-width:680px;">
-    <!-- Progress Indicator -->
-    <div class="enrollment-progress">
-      <div class="progress-step active">
-        <div class="progress-dot">1</div>
-        <span>Register</span>
-      </div>
-      <div class="progress-sep active"></div>
-      <div class="progress-step active">
-        <div class="progress-dot">2</div>
-        <span>Select Locker</span>
-      </div>
-      <div class="progress-sep active"></div>
-      <div class="progress-step active">
-        <div class="progress-dot">3</div>
-        <span>Fingerprint</span>
-      </div>
-    </div>
-
     <!-- Card -->
     <div class="enrollment-card" style="background:#fff; border-radius:20px; border:1px solid #e2e8f0; padding:2rem;">
       <!-- Header with icon -->
@@ -346,27 +327,6 @@
         <p id="btn-hint" style="font-size: 11px; color: #7a8fa6; margin: 8px 0 0; opacity: 0.7;">
           Click to activate the fingerprint scanner
         </p>
-      </div>
-
-      <!-- Divider -->
-      <div style="border-top:1px solid #f0f2f5; margin:1.5rem 0;"></div>
-
-      <!-- Instructions -->
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom:1.5rem;
-                  background:#fff9f0; border-radius:10px; padding:12px 14px; border-left:3px solid #f59e0b;">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="flex-shrink:0;">
-          <circle cx="8" cy="8" r="7" stroke="#f59e0b" stroke-width="1.5"/>
-          <rect x="7.25" y="7" width="1.5" height="5" rx="0.75" fill="#f59e0b"/>
-          <circle cx="8" cy="5" r="0.9" fill="#f59e0b"/>
-        </svg>
-        <div>
-          <p style="margin:0; font-size:12px; color:#a16207; line-height:1.5; font-weight:600;">
-            Step 1: Click "Start Fingerprint Enrollment" below
-          </p>
-          <p style="margin:4px 0 0; font-size:11px; color:#a16207; line-height:1.4; opacity:0.8;">
-            This activates the fingerprint scanner. After the first scan, the device may prompt you for another finger placement to complete enrollment.
-          </p>
-        </div>
       </div>
 
       <!-- Buttons -->
@@ -643,4 +603,3 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 {% endblock %}
-

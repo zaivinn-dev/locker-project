@@ -144,9 +144,6 @@
           <small class="text-muted">{{ guests|length }} guest records</small>
         </div>
         <div class="d-flex gap-2 align-items-center">
-          <button type="button" class="btn btn-sm btn-outline-info" onclick="showCardAuditReport()">
-            <i class="bi bi-card-checklist me-1"></i> Card Audit
-          </button>
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="showCardAuditHistory()">
             <i class="bi bi-clock-history me-1"></i> Card Audit History
           </button>
@@ -159,7 +156,7 @@
           <thead class="position-sticky" style="top: 0; background: white; z-index: 10;">
             <tr>
               <th style="width: 70px;">Guest ID</th>
-              <th style="width: 170px;">Name</th>
+              <th style="width: 170px;">Full Name</th>
               <th style="width: 130px;">RFID Card</th>
               <th style="width: 100px;">Locker</th>
               <th style="width: 120px;">Category</th>
@@ -206,18 +203,13 @@
                     {% endif %}
                   </td>
                   <td>
-                    <div class="btn-group" role="group" aria-label="Guest actions">
-                      <button type="button" class="btn btn-sm btn-outline-primary" title="View details"
-                              onclick="showGuestDetails({{ guest.id }})">
-                        <i class="bi bi-eye"></i>
-                      </button>
-                      <button type="button" class="btn btn-sm btn-outline-danger" title="Remove"
-                              onclick="showDeleteModal('guest', { id: {{ guest.id }}, rfid_uid: '{{ guest.rfid_uid }}', name: '{{ guest.full_name|replace("'", "\\'") }}', locker_id: {{ guest.locker_id or 'null' }} }, function() { document.getElementById('deleteForm{{ guest.id }}').submit(); })">
-                        <i class="bi bi-trash"></i>
-                      </button>
-                    </div>
-                    <form id="deleteForm{{ guest.id }}" method="post" 
-                          action="{{ url_for('admin.admin_delete_guest', guest_id=guest.id) }}" style="display: none;"></form>
+                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="if(confirm('Are you sure you want to remove this guest?')) { document.getElementById('deleteForm{{ guest.id }}').submit(); }">
+                      <i class="bi bi-trash"></i> Remove
+                    </button>
+                    <form id="deleteForm{{ guest.id }}" method="post" action="{{ url_for('admin.admin_delete_guest', guest_id=guest.id) }}" style="display: none;"></form-sm btn-outline-danger" onclick="if(confirm('Are you sure you want to remove this guest?')) { document.getElementById('deleteForm{{ guest.id }}').submit(); }">
+                      <i class="bi bi-trash"></i> Remove
+                    </button>
+                    <form id="deleteForm{{ guest.id }}" method="post" action="{{ url_for('admin.admin_delete_guest', guest_id=guest.id) }}" style="display: none;"></form>
                   </td>
                 </tr>
               {% endfor %}
@@ -355,11 +347,12 @@
   </div>
 </div>
 
+<!-- Card Audit History Modal -->
 <div class="modal fade" id="cardAuditModal" tabindex="-1">
-  <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Card Audit Report</h5>
+        <h5 class="modal-title">Card Audit History</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
@@ -499,7 +492,7 @@ document.getElementById('createGuestForm').addEventListener('submit', function(e
     });
 });
 
-let currentCardAuditView = 'report';
+let currentCardAuditView = 'history';
 let currentCardAuditQuery = '';
 
 function showGuestDetails(guestId) {
@@ -570,50 +563,7 @@ function openCardAuditModal(title) {
     return content;
 }
 
-function renderCardAuditSummary(data) {
-    const summary = data.summary || {};
-    const cards = data.cards || [];
-    const rows = cards.slice(0, 12).map(card => {
-        const status = card.status || 'UNKNOWN';
-        const canAct = card.rfid_uid && !['RETURNED','BLACKLISTED','LOST'].includes(card.status);
-        const actionButtons = canAct ? `
-                    <button type="button" class="btn btn-sm btn-success me-1" onclick="markCardReturned('${card.rfid_uid}')">Return</button>
-                    <button type="button" class="btn btn-sm btn-danger" onclick="markCardLost('${card.rfid_uid}')">Lost</button>
-                  ` : '<span class="text-muted small">No actions</span>';
-        return `
-                  <tr>
-                    <td>${card.rfid_uid || '—'}</td>
-                    <td>${card.guest_name || '—'}</td>
-                    <td>${card.locker_id !== undefined && card.locker_id !== null ? `#${card.locker_id}` : '—'}</td>
-                    <td>${status}</td>
-                    <td>${actionButtons}</td>
-                  </tr>`;
-    }).join('');
 
-    return `
-              <div class="row mb-3">
-                <div class="col-6 col-md-4 mb-2"><strong>Total cards:</strong> ${data.total_cards}</div>
-                <div class="col-6 col-md-4 mb-2"><strong>Active:</strong> ${summary.active || 0}</div>
-                <div class="col-6 col-md-4 mb-2"><strong>Returned:</strong> ${summary.returned || 0}</div>
-                <div class="col-6 col-md-4 mb-2"><strong>Lost/Blacklisted:</strong> ${summary.lost || 0} / ${summary.blacklisted || 0}</div>
-                <div class="col-6 col-md-4 mb-2"><strong>Returned today:</strong> ${summary.returned_today || 0}</div>
-              </div>
-              <div class="table-responsive">
-                <table class="table table-sm table-hover">
-                  <thead>
-                    <tr>
-                      <th>RFID</th>
-                      <th>Guest</th>
-                      <th>Locker</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>${rows || '<tr><td colspan="5" class="text-center">No card audit entries found. Issue a guest RFID card to populate this report.</td></tr>'}</tbody>
-                </table>
-              </div>
-            `;
-}
 
 function renderCardAuditHistory(data) {
     const cards = data.cards || [];
@@ -675,24 +625,7 @@ function renderCardAuditHistory(data) {
             `;
 }
 
-function showCardAuditReport() {
-    currentCardAuditView = 'report';
-    const content = openCardAuditModal('Card Audit Report');
 
-    fetch('/api/admin/card-audit-report')
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                content.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
-                return;
-            }
-            content.innerHTML = renderCardAuditSummary(data);
-        })
-        .catch(err => {
-            console.error('Error loading card audit report:', err);
-            content.innerHTML = '<div class="alert alert-danger">Unable to load audit report. Please try again later.</div>';
-        });
-}
 
 function showCardAuditHistory(q = '') {
     currentCardAuditView = 'history';
@@ -785,11 +718,7 @@ function markCardLost(rfid_uid) {
 }
 
 function refreshCardAuditView() {
-    if (currentCardAuditView === 'history') {
-        showCardAuditHistory();
-    } else {
-        showCardAuditReport();
-    }
+    showCardAuditHistory();
 }
 
 // Ensure visible Bootstrap modals are not marked aria-hidden for accessibility.
