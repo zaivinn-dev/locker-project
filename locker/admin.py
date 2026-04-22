@@ -263,16 +263,15 @@ def admin_unlock_all():
         flask.flash("Action denied: Not logged in as admin", "danger")
         return guard
 
-    confirm_text = (request.form.get("confirm_text") or "").strip()
     admin_password = (request.form.get("admin_password") or "").strip()
 
-    if confirm_text != MASTER_UNLOCK_CONFIRM_TEXT:
-        flask.flash(f"Unlock cancelled: type '{MASTER_UNLOCK_CONFIRM_TEXT}' to confirm.", "danger")
-        return redirect(url_for("admin.admin_dashboard"))
-
-    if not verify_admin_credentials(session.get("admin_username", ""), admin_password):
-        flask.flash("Unlock cancelled: invalid admin password.", "danger")
-        return redirect(url_for("admin.admin_dashboard"))
+    credentials = verify_admin_credentials_with_db(
+        session.get("admin_username", ""),
+        admin_password
+    )
+    if not credentials["valid"] or credentials["role"] != "Admin":
+        flask.flash("Unlock cancelled: invalid admin password or insufficient permissions.", "danger")
+        return redirect(url_for("admin.admin_settings"))
 
     device_controller = get_device_controller()
     locker_ids = [1, 2, 3, 4]

@@ -43,12 +43,12 @@ try:
     from .db import connect, init_db
     from .device import get_device_controller
     from .device.background_jobs import start_background_jobs, stop_background_jobs, add_card_fee_to_payment
-    from .admin import admin_bp, load_settings, verify_admin_credentials, ADMIN_USERNAME
+    from .admin import admin_bp, load_settings, verify_admin_credentials_with_db, ADMIN_USERNAME
 except ImportError:
     from db import connect, init_db
     from device import get_device_controller
     from device.background_jobs import start_background_jobs, stop_background_jobs, add_card_fee_to_payment
-    from admin import admin_bp, load_settings, verify_admin_credentials, ADMIN_USERNAME
+    from admin import admin_bp, load_settings, verify_admin_credentials_with_db, ADMIN_USERNAME
 
 # Global device controller instance - lazy initialized
 device = None
@@ -795,7 +795,8 @@ def create_app() -> Flask:
             return {"error": "missing password"}, 400
 
         admin_username = session.get("admin_username", ADMIN_USERNAME)
-        if not verify_admin_credentials(admin_username, password):
+        credentials = verify_admin_credentials_with_db(admin_username, password)
+        if not credentials["valid"]:
             return {"error": "invalid credentials"}, 403
 
         if system_lock_state["locked"]:
@@ -851,7 +852,8 @@ def create_app() -> Flask:
             return {"error": "missing password"}, 400
 
         admin_username = session.get("admin_username", ADMIN_USERNAME)
-        if not verify_admin_credentials(admin_username, password):
+        credentials = verify_admin_credentials_with_db(admin_username, password)
+        if not credentials["valid"]:
             return {"error": "invalid credentials"}, 403
 
         if not system_lock_state["locked"]:

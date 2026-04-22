@@ -6,14 +6,16 @@
 <style>
   .kpi-card {
     border: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     border-radius: 0.5rem;
   }
+
   .kpi-number {
     font-size: 1.8rem;
     font-weight: 700;
     color: var(--brand-blue);
   }
+
   .kpi-label {
     color: #6c757d;
     font-size: 0.8rem;
@@ -24,34 +26,40 @@
 
   .locker-card {
     border: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     border-radius: 0.5rem;
     transition: transform 0.2s, box-shadow 0.2s;
     height: 100%;
   }
+
   .locker-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
+
   .locker-header {
     border-bottom: 1px solid #e9ecef;
     padding: 1rem;
     background: #f8f9fa;
   }
+
   .locker-status-icon {
     font-size: 2rem;
     text-align: center;
     margin-bottom: 0.75rem;
   }
+
   .locker-info-row {
     display: flex;
     justify-content: space-between;
     padding: 0.65rem 0;
     border-bottom: 1px solid #f0f0f0;
   }
+
   .locker-info-row:last-child {
     border-bottom: none;
   }
+
   .locker-label {
     color: #6c757d;
     font-size: 0.75rem;
@@ -59,10 +67,12 @@
     text-transform: uppercase;
     letter-spacing: 0.02em;
   }
+
   .locker-value {
     font-size: 0.9rem;
     font-weight: 500;
   }
+
   .locker-grid {
     max-width: 900px;
     margin: 0 auto;
@@ -72,9 +82,11 @@
   .card-header {
     font-weight: 600;
   }
+
   .badge {
     font-size: 0.75rem;
   }
+
   .btn-sm {
     font-size: 0.8rem;
   }
@@ -94,9 +106,6 @@
     <div class="d-flex gap-2">
       <button class="btn btn-outline-primary" onclick="refreshLockers()">
         <i class="fas fa-sync-alt"></i> Refresh
-      </button>
-      <button class="btn btn-primary" onclick="showBulkActions()">
-        <i class="fas fa-cogs"></i> Bulk Actions
       </button>
     </div>
   </div>
@@ -180,118 +189,118 @@
     <div class="card-body">
       <div class="locker-grid">
         <div class="row g-4 justify-content-center" id="lockersGrid">
-        {% for locker in lockers %}
+          {% for locker in lockers %}
           <div class="col-6 col-md-4 col-lg-3">
-            <div class="card locker-card h-100 {% if locker.assigned_to %}border-primary{% elif locker.status == 'occupied' %}border-warning{% else %}border-success{% endif %}">
+            <div
+              class="card locker-card h-100 {% if locker.assigned_to %}border-primary{% elif locker.status == 'occupied' %}border-warning{% else %}border-success{% endif %}">
               <div class="locker-header d-flex justify-content-between align-items-center">
                 <h6 class="mb-0">{{ locker.label }}</h6>
                 {% if locker.assigned_to and locker.assigned_to.type == 'member' %}
-                  <span class="badge bg-warning text-dark" style="font-size: 0.75rem;">🔒 member</span>
+                <span class="badge bg-warning text-dark" style="font-size: 0.75rem;">🔒 member</span>
                 {% elif locker.assigned_to and locker.assigned_to.type == 'guest' %}
-                  <span class="badge bg-info text-dark" style="font-size: 0.75rem;">🎫 guest</span>
+                <span class="badge bg-info text-dark" style="font-size: 0.75rem;">🎫 guest</span>
                 {% elif locker.status == 'occupied' %}
-                  <span class="badge bg-danger" style="font-size: 0.75rem;">📦 occupied</span>
+                <span class="badge bg-danger" style="font-size: 0.75rem;">📦 occupied</span>
                 {% else %}
-                  <span class="badge bg-success" style="font-size: 0.75rem;">🔓 available</span>
+                <span class="badge bg-success" style="font-size: 0.75rem;">🔓 available</span>
                 {% endif %}
               </div>
               <div class="card-body p-3">
                 {% if locker.assigned_to %}
-                  <div class="locker-info-row">
-                    <span class="locker-label">Assigned to</span>
-                    <span class="locker-value">{{ locker.assigned_to.name }}</span>
-                  </div>
-                  <div class="locker-info-row">
-                    <span class="locker-label">Type</span>
-                    <span>
-                      {% if locker.assigned_to.type == 'guest' %}
-                        <span class="badge bg-info text-dark" style="font-size: 0.75rem;">guest</span>
-                      {% else %}
-                        <span class="badge bg-primary" style="font-size: 0.75rem;">member</span>
-                      {% endif %}
-                    </span>
-                  </div>
-                  {% if locker.assigned_to.type == 'guest' %}
-                  <div class="locker-info-row">
-                    <span class="locker-label">Status</span>
-                    <span class="locker-value">Assigned</span>
-                  </div>
-                  <div class="locker-info-row">
-                    <span class="locker-label">Locker contents</span>
-                    <span class="locker-value">
-                      {% if locker.status == 'occupied' %}
-                        Occupied
-                      {% else %}
-                        Empty
-                      {% endif %}
-                    </span>
-                  </div>
-                  {% endif %}
-                  {% if locker.assigned_to.type == 'member' %}
-                  <div class="locker-info-row">
-                    <span class="locker-label">Status</span>
-                    <span class="locker-value">
-                      {% if locker.assigned_to.member_status == 'approved' %}Approved{% elif locker.assigned_to.member_status == 'pending' %}Pending{% else %}Rejected{% endif %}
-                    </span>
-                  </div>
-                  <div class="locker-info-row">
-                    <span class="locker-label">Payment</span>
-                    <span class="locker-value">{{ 'Paid' if locker.assigned_to.payment_status == 'paid' else 'Unpaid' }}</span>
-                  </div>
-                  {% endif %}
-                  <div class="d-grid gap-2 mt-3">
+                <div class="locker-info-row">
+                  <span class="locker-label">Assigned to</span>
+                  <span class="locker-value">{{ locker.assigned_to.name }}</span>
+                </div>
+                <div class="locker-info-row">
+                  <span class="locker-label">Type</span>
+                  <span>
                     {% if locker.assigned_to.type == 'guest' %}
-                      {% set delete_url = url_for('admin.admin_delete_guest', guest_id=locker.assigned_to.id) %}
-                      {% set safe_label = locker.label|string|replace("'", "\\'") %}
-                      {% set safe_name = locker.assigned_to.name|string|replace("'", "\\'") %}
-                      <button type="button" class="btn btn-sm btn-outline-danger" 
-                              onclick="showDeleteModal('locker', {locker_id: '{{ safe_label }}', name: '{{ safe_name }}'}, function() { fetch('{{ delete_url }}', { method: 'POST' }).then(r => location.reload()); })">
-                        Free Locker
-                      </button>
+                    <span class="badge bg-info text-dark" style="font-size: 0.75rem;">guest</span>
                     {% else %}
-                      <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Member Assigned</button>
+                    <span class="badge bg-primary" style="font-size: 0.75rem;">member</span>
                     {% endif %}
-                  </div>
+                  </span>
+                </div>
+                {% if locker.assigned_to.type == 'guest' %}
+                <div class="locker-info-row">
+                  <span class="locker-label">Status</span>
+                  <span class="locker-value">Assigned</span>
+                </div>
+                <div class="locker-info-row">
+                  <span class="locker-label">Locker contents</span>
+                  <span class="locker-value">
+                    {% if locker.status == 'occupied' %}
+                    Occupied
+                    {% else %}
+                    Empty
+                    {% endif %}
+                  </span>
+                </div>
+                {% endif %}
+                {% if locker.assigned_to.type == 'member' %}
+                <div class="locker-info-row">
+                  <span class="locker-label">Status</span>
+                  <span class="locker-value">
+                    {% if locker.assigned_to.member_status == 'approved' %}Approved{% elif
+                    locker.assigned_to.member_status == 'pending' %}Pending{% else %}Rejected{% endif %}
+                  </span>
+                </div>
+                <div class="locker-info-row">
+                  <span class="locker-label">Payment</span>
+                  <span class="locker-value">{{ 'Paid' if locker.assigned_to.payment_status == 'paid' else 'Unpaid'
+                    }}</span>
+                </div>
+                {% endif %}
+                <div class="d-grid gap-2 mt-3">
+                  {% if locker.assigned_to.type == 'guest' %}
+                  {% set delete_url = url_for('admin.admin_delete_guest', guest_id=locker.assigned_to.id) %}
+                  {% set safe_label = locker.label|string|replace("'", "\\'") %}
+                  {% set safe_name = locker.assigned_to.name|string|replace("'", "\\'") %}
+                  <button type="button" class="btn btn-sm btn-outline-danger"
+                    onclick="showDeleteModal('locker', {locker_id: '{{ safe_label }}', name: '{{ safe_name }}'}, function() { fetch('{{ delete_url }}', { method: 'POST' }).then(r => location.reload()); })">
+                    Free Locker
+                  </button>
+                  {% else %}
+                  <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Member Assigned</button>
+                  {% endif %}
+                </div>
                 {% else %}
-                  <div class="locker-info-row">
-                    <span class="locker-label">Locker type</span>
-                    <span class="locker-value">{% if locker.type == 'member' %}Member-only{% else %}Guest-only{% endif %}</span>
-                  </div>
-                  <div class="text-center py-4">
-                    {% if locker.type == 'guest' %}
-                      {% if locker.status == 'occupied' %}
-                        <div class="mb-3"><i class="fas fa-archive fa-3x text-warning"></i></div>
-                        <h6 class="text-warning fw-bold mb-2">Contents Detected</h6>
-                        <p class="text-muted small mb-3">IR sensor indicates locker is not empty</p>
-                      {% else %}
-                        <div class="mb-3"><i class="fas fa-box-open fa-3x text-success"></i></div>
-                        <h6 class="text-success fw-bold mb-2">Available</h6>
-                        <p class="text-muted small mb-3">Ready for assignment</p>
-                      {% endif %}
-                    {% else %}
-                      <div class="mb-3"><i class="fas fa-slash fa-3x text-secondary"></i></div>
-                      <h6 class="text-secondary fw-bold mb-2">Not monitored</h6>
-                      <p class="text-muted small mb-3">Member lockers are not monitored by IR sensors</p>
-                    {% endif %}
-                  </div>
+                <div class="locker-info-row">
+                  <span class="locker-label">Locker type</span>
+                  <span class="locker-value">{% if locker.type == 'member' %}Member-only{% else %}Guest-only{% endif
+                    %}</span>
+                </div>
+                <div class="text-center py-4">
+                  {% if locker.type == 'guest' %}
+                  {% if locker.status == 'occupied' %}
+                  <div class="mb-3"><i class="fas fa-archive fa-3x text-warning"></i></div>
+                  <h6 class="text-warning fw-bold mb-2">Contents Detected</h6>
+                  <p class="text-muted small mb-3">IR sensor indicates locker is not empty</p>
+                  {% else %}
+                  <div class="mb-3"><i class="fas fa-box-open fa-3x text-success"></i></div>
+                  <h6 class="text-success fw-bold mb-2">Available</h6>
+                  <p class="text-muted small mb-3">Ready for assignment</p>
+                  {% endif %}
+                  {% else %}
+                  <div class="mb-3"><i class="fas fa-slash fa-3x text-secondary"></i></div>
+                  <h6 class="text-secondary fw-bold mb-2">Not monitored</h6>
+                  <p class="text-muted small mb-3">Member lockers are not monitored by IR sensors</p>
+                  {% endif %}
+                </div>
                 {% endif %}
               </div>
             </div>
           </div>
-        {% endfor %}
+          {% endfor %}
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-<script>
-// Simple refresh function
-function refreshLockers() {
-  location.reload();
-}
-
-function showBulkActions() {
-  alert('Bulk actions feature coming soon!');
-}
-</script>
-{% endblock %}
+  <script>
+    // Simple refresh function
+    function refreshLockers() {
+      location.reload();
+    }
+  </script>
+  {% endblock %}

@@ -386,18 +386,12 @@
   }
 
   function validateUnlockConfirmation() {
-    const expected = '{{ master_unlock_text }}';
-    const confirmText = document.getElementById('master_confirm_text').value.trim();
     const password = document.getElementById('master_admin_password').value;
-    if (confirmText !== expected) {
-      alert(`Please type "${expected}" exactly to confirm.`);
-      return false;
-    }
     if (!password) {
       alert('Please enter your admin password to proceed.');
       return false;
     }
-    return confirm('Unlock all lockers now? This action cannot be undone.');
+    return confirm('Unlock all lockers now? This action requires your secure admin password and cannot be undone.');
   }
 </script>
 {% endblock %}
@@ -564,11 +558,7 @@
       </div>
       <form method="post" action="{{ url_for('admin.admin_unlock_all') }}" onsubmit="return validateUnlockConfirmation()">
         <div class="modal-body">
-          <p class="form-hint">Type the confirmation phrase and enter your admin password to proceed.</p>
-          <div class="form-group">
-            <label class="form-label" for="master_confirm_text">Confirmation Phrase</label>
-            <input id="master_confirm_text" name="confirm_text" class="form-control" type="text" placeholder="{{ master_unlock_text }}" autocomplete="off" required />
-          </div>
+          <p class="form-hint">Enter your admin password to securely unlock all lockers.</p>
           <div class="form-group">
             <label class="form-label" for="master_admin_password">Admin Password</label>
             <input id="master_admin_password" name="admin_password" class="form-control" type="password" placeholder="Enter admin password" autocomplete="current-password" required />
