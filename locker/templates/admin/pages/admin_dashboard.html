@@ -105,7 +105,7 @@
         <div class="card-body p-3">
           <div class="kpi-label">Locker Available</div>
           <div class="kpi-number" style="color: #28a745;">{{ totals.lockers_available }}</div>
-          <small class="text-muted">{{ totals.lockers_occupied }} occupied</small>
+          <small class="text-muted">{{ totals.lockers_occupied }} occupied &middot; {{ totals.lockers_assigned }} assigned ({{ totals.lockers_total }} total)</small>
         </div>
       </div>
     </div>
@@ -132,7 +132,8 @@
           <div class="bar-chart">
             {% for a in activity_7d %}
               {% set pct = ((a.count / max_count) * 100) if max_count > 0 else 5 %}
-              <div class="bar" style="height: {{ pct }}%;" title="{{ a.count }} events"></div>
+              {% set style_attr = 'style="height: ' ~ pct ~ '%;"' %}
+              <div class="bar" {{ style_attr|safe }} title="{{ a.count }} events"></div>
             {% endfor %}
           </div>
           <div class="row g-2 mt-2 text-center">
@@ -291,7 +292,7 @@
                     <td>
                       <span class="badge bg-{{ badge_class }}" style="font-size: 0.65rem;">{{ action_label }}</span>
                     </td>
-                    <td class="text-muted small" style="max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ l["detail"] or '-' }}</td>
+                    <td class="text-muted small" style="max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ l["detail"]|replace(';', ' <span class="mx-1" style="color: #dee2e6;">|</span> ')|safe if l["detail"] else '-' }}</td>
                   </tr>
                 {% else %}
                   <tr><td colspan="4" class="text-center text-muted py-3 small">No activity yet</td></tr>

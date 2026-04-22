@@ -56,8 +56,8 @@ DEFAULT_SETTINGS = {
     "low_balance_alert": True,
 }
 
-ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
 MASTER_UNLOCK_CONFIRM_TEXT = os.getenv("MASTER_UNLOCK_CONFIRM_TEXT", "UNLOCK ALL")
 
 def load_settings():
@@ -188,6 +188,8 @@ def admin_login():
 
 
 def verify_admin_credentials(username: str, password: str) -> bool:
+    if not ADMIN_USERNAME or not ADMIN_PASSWORD:
+        return False
     return hmac.compare_digest(username, ADMIN_USERNAME) and hmac.compare_digest(password, ADMIN_PASSWORD)
 
 
@@ -458,21 +460,35 @@ def admin_dashboard():
         # NOTE: Expired guest records are now retained so expired RFID cards remain visible
         # in the admin audit pages and can still be marked as returned or lost.
         totals = {
-            "members_total": conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'regular'").fetchone()["c"],
+            "members_total": conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'regular' AND status != 'rejected'").fetchone()["c"],
             "members_pending": conn.execute(
-                "SELECT COUNT(*) AS c FROM members WHERE member_type = 'regular' AND (status = 'pending' OR payment_status != 'paid')"
+                "SELECT COUNT(*) AS c FROM members WHERE member_type = 'regular' AND status != 'rejected' AND (status = 'pending' OR payment_status != 'paid')"
             ).fetchone()["c"],
             "members_confirmed": conn.execute(
                 "SELECT COUNT(*) AS c FROM members WHERE member_type = 'regular' AND status = 'approved' AND payment_status = 'paid'"
             ).fetchone()["c"],
             "guests_total": conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest'").fetchone()["c"],
-            "guests_active": conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest'").fetchone()["c"],
-            "lockers_total": conn.execute("SELECT COUNT(*) AS c FROM lockers").fetchone()["c"],
-            "lockers_available": conn.execute("SELECT COUNT(*) AS c FROM lockers WHERE status = 'available'").fetchone()["c"],
-            "lockers_occupied": conn.execute("SELECT COUNT(*) AS c FROM lockers WHERE status = 'occupied'").fetchone()["c"],
+            "guests_active": conn.execute(
+                "SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest' AND (expiry_date IS NULL OR datetime(expiry_date) > datetime('now'))"
+            ).fetchone()["c"],
             "logs_total": conn.execute("SELECT COUNT(*) AS c FROM access_logs").fetchone()["c"],
             "revenue_total": conn.execute("SELECT COALESCE(SUM(amount), 0) AS total FROM payments").fetchone()["total"],
         }
+        
+        # Calculate real locker statistics matching the admin_lockers exact logic
+        lockers_data = conn.execute(
+            """
+            SELECT l.status, m.id AS member_id
+            FROM lockers l
+            LEFT JOIN members m ON l.id = m.locker_id 
+                AND ((m.member_type != 'guest' AND m.status != 'rejected') OR (m.member_type = 'guest'))
+            """
+        ).fetchall()
+        
+        totals["lockers_total"] = len(lockers_data)
+        totals["lockers_assigned"] = sum(1 for r in lockers_data if r["member_id"])
+        totals["lockers_occupied"] = sum(1 for r in lockers_data if not r["member_id"] and r["status"] == "occupied")
+        totals["lockers_available"] = sum(1 for r in lockers_data if not r["member_id"] and r["status"] != "occupied")
 
         monthly_revenue = conn.execute(
             "SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE datetime(payment_date) >= datetime('now', '-29 days')"
@@ -768,7 +784,6 @@ def admin_delete_member(member_id: int):
         ).fetchone()
         if member:
             locker_id = member["locker_id"]
-        fee = 400 if member["category"] == "student" else 500
             fingerprint_uid = member["fingerprint_uid"]
             rfid_uid = member["rfid_uid"]
 
@@ -831,14 +846,19 @@ def admin_payments():
             """
         ).fetchall()
 
-        total_revenue = conn.execute(
-            "SELECT SUM(amount) AS total FROM payments"
-        ).fetchone()["total"] or 0
+        stats = conn.execute(
+            "SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total FROM payments"
+        ).fetchone()
+        total_payments = stats["count"]
+        total_revenue = stats["total"]
+        avg_payment = (total_revenue / total_payments) if total_payments > 0 else 0
 
     return render_template(
         "admin/pages/admin_payments.html",
         payments=payments,
         total_revenue=total_revenue,
+        total_payments=total_payments,
+        avg_payment=avg_payment,
         current_page="payments",
         admin_username=session.get("admin_username"),
     )
@@ -1103,7 +1123,7 @@ def admin_lockers():
             FROM lockers l
             LEFT JOIN members m ON l.id = m.locker_id 
                 AND (
-                    (m.member_type != 'guest' AND m.status = 'approved')
+                    (m.member_type != 'guest' AND m.status != 'rejected')
                     OR (m.member_type = 'guest')
                 )
             ORDER BY l.id ASC
@@ -1135,16 +1155,9 @@ def admin_lockers():
         # Summary stats
         stats = {
             "total": len(lockers),
-            "available": sum(
-                1 for l in lockers
-                if (l["type"] == "member" and l["assigned_to"] is None)
-                or (l["type"] == "guest" and l["assigned_to"] is None and l["status"] == "available")
-            ),
-            "occupied": sum(
-                1 for l in lockers
-                if l["type"] == "guest" and l["status"] == "occupied"
-            ),
-            "assigned": sum(1 for l in lockers if l["assigned_to"] is not None)
+            "assigned": sum(1 for l in lockers if l["assigned_to"] is not None),
+            "occupied": sum(1 for l in lockers if l["assigned_to"] is None and l["status"] == "occupied"),
+            "available": sum(1 for l in lockers if l["assigned_to"] is None and l["status"] != "occupied")
         }
     
     return render_template(
@@ -1943,9 +1956,15 @@ def admin_analytics():
     
     with connect() as conn:
         total_members = conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'regular'").fetchone()["c"]
+        approved_members = conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'regular' AND status = 'approved'").fetchone()["c"]
         total_guests = conn.execute("SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest'").fetchone()["c"]
-        active_guests = total_guests
-        expired_guests = 0
+        active_guests = conn.execute(
+            "SELECT COUNT(*) AS c FROM members WHERE member_type = 'guest' AND (expiry_date IS NULL OR datetime(expiry_date) > datetime('now'))"
+        ).fetchone()["c"]
+        expired_guests = total_guests - active_guests
+        
+        total_users = total_members + total_guests
+        active_users = approved_members + active_guests
         total_access_logs = conn.execute("SELECT COUNT(*) AS c FROM access_logs WHERE actor_type NOT IN ('system', 'ir_sensor')").fetchone()["c"]
         total_revenue = conn.execute("SELECT COALESCE(SUM(amount), 0) AS total FROM payments").fetchone()["total"]
         
@@ -1964,13 +1983,18 @@ def admin_analytics():
             "SELECT COUNT(*) AS c FROM payments WHERE datetime(payment_date) >= datetime('now', '-29 days')"
         ).fetchone()["c"]
         
-        # Guest category distribution
-        guest_category_distribution = conn.execute(
+        # User category distribution
+        user_category_distribution = conn.execute(
             """
-            SELECT category, COUNT(*) AS c
+            SELECT 
+                CASE 
+                    WHEN member_type = 'regular' THEN 'Member'
+                    WHEN member_type = 'guest' THEN 'Guest'
+                    ELSE member_type
+                END AS category, 
+                COUNT(*) AS c
             FROM members
-            WHERE member_type = 'guest'
-            GROUP BY category
+            GROUP BY 1
             """
         ).fetchall()
 
@@ -2007,12 +2031,15 @@ def admin_analytics():
             "total_access_logs": total_access_logs,
             "total_revenue": total_revenue,
             "monthly_revenue": sum(item["total"] for item in daily_revenue),
-            "monthly_access_count": monthly_payment_count,
+            "monthly_payments_count": monthly_payment_count,
+            "approved_members": approved_members,
+            "total_users": total_users,
+            "active_users": active_users,
         },
         top_actions=top_actions,
         access_by_type=access_by_type,
         daily_revenue=[dict(row) for row in daily_revenue],
-        guest_category_distribution=[dict(row) for row in guest_category_distribution],
+        user_category_distribution=[dict(row) for row in user_category_distribution],
     )
 
 
@@ -2447,10 +2474,13 @@ def admin_management():
             """
         ).fetchall()
     
+    current_admin_role = _normalize_role(session.get("admin_role", "Admin"))
+    
     return render_template(
         "admin/pages/admin_management.html",
         current_page="admin_management",
         admin_username=session.get("admin_username"),
+        current_admin_role=current_admin_role,
         logs=logs,
         actor_stats=actor_stats,
         q=q,

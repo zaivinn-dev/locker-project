@@ -241,7 +241,13 @@
                   {% endif %}
                   <div class="d-grid gap-2 mt-3">
                     {% if locker.assigned_to.type == 'guest' %}
-                      <button type="button" class="btn btn-sm btn-outline-danger" onclick="showDeleteModal('locker', {'locker_id': '{{ locker.label }}', 'name': '{{ locker.assigned_to.name }}'}, function() { fetch('{{ url_for('admin.admin_delete_guest', guest_id=locker.assigned_to.id) }}', { method: 'POST' }).then(r => location.reload()); })">Free Locker</button>
+                      {% set delete_url = url_for('admin.admin_delete_guest', guest_id=locker.assigned_to.id) %}
+                      {% set safe_label = locker.label|string|replace("'", "\\'") %}
+                      {% set safe_name = locker.assigned_to.name|string|replace("'", "\\'") %}
+                      <button type="button" class="btn btn-sm btn-outline-danger" 
+                              onclick="showDeleteModal('locker', {locker_id: '{{ safe_label }}', name: '{{ safe_name }}'}, function() { fetch('{{ delete_url }}', { method: 'POST' }).then(r => location.reload()); })">
+                        Free Locker
+                      </button>
                     {% else %}
                       <button type="button" class="btn btn-sm btn-outline-secondary" disabled>Member Assigned</button>
                     {% endif %}

@@ -53,7 +53,7 @@
           <div class="d-flex align-items-start justify-content-between mb-2">
             <div>
               <div class="kpi-label">Total Payments</div>
-              <div class="kpi-number">{{ payments|length }}</div>
+              <div class="kpi-number">{{ total_payments|default(0) }}</div>
             </div>
             <i class="fas fa-receipt fa-lg text-muted"></i>
           </div>
@@ -67,7 +67,7 @@
           <div class="d-flex align-items-start justify-content-between mb-2">
             <div>
               <div class="kpi-label">Avg Payment</div>
-              <div class="kpi-number">₱{% if payments|length > 0 %}{{ "{:,.0f}".format(total_revenue / payments|length) }}{% else %}0{% endif %}</div>
+              <div class="kpi-number">₱{{ "{:,.0f}".format(avg_payment|default(0)) }}</div>
             </div>
             <i class="fas fa-chart-line fa-lg text-muted"></i>
           </div>

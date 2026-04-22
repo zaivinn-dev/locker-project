@@ -5,6 +5,18 @@ from flask import Flask, jsonify, make_response, redirect, render_template, requ
 from requests.exceptions import RequestException
 
 import os
+import sys
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+if hasattr(sys.stderr, 'reconfigure'):
+    try:
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 try:
     from dotenv import load_dotenv
@@ -340,7 +352,7 @@ def create_app() -> Flask:
         timeout_seconds = scan_control_state.get("timeout_seconds", 60)
         
         if not last_enabled or (datetime.now(timezone.utc) - last_enabled).total_seconds() >= timeout_seconds:
-            print(f"[FINGERPRINT ACCESS] ✗ REJECTED - Fingerprint scanning not enabled (must use Member Access page)")
+            print(f"[FINGERPRINT ACCESS] [REJECTED] - Fingerprint scanning not enabled (must use Member Access page)")
             return {"status": "rejected", "reason": "scanning_not_enabled"}, 403
 
         print(f"[FINGERPRINT ACCESS] Received fingerprint UID: {uid}")
@@ -386,14 +398,15 @@ def create_app() -> Flask:
             return {"status": "failed", "reason": "no locker assigned"}, 409
 
         if not is_member_locker(int(locker_id)):
-            print(f"[FINGERPRINT ACCESS] ✗ Member locker assignment invalid for locker {locker_id}")
+            print(f"[FINGERPRINT ACCESS] [ERROR] Member locker assignment invalid for locker {locker_id}")
             return {"status": "denied", "reason": "locker_not_member_accessible"}, 403
 
-        print(f"[FINGERPRINT ACCESS] ✓ Member {member['full_name']} (ID={member['id']}) matched - unlocking locker {locker_id}")
+        safe_name = str(member['full_name']).encode('ascii', 'replace').decode('ascii')
+        print(f"[FINGERPRINT ACCESS] [SUCCESS] Member {safe_name} (ID={member['id']}) matched - unlocking locker {locker_id}")
         try:
             get_device().unlock(int(locker_id))
         except RequestException as exc:
-            print(f"[FINGERPRINT ACCESS] ✗ ESP32 connection error: {exc}")
+            print(f"[FINGERPRINT ACCESS] [ERROR] ESP32 connection error: {exc}")
             access_status_state["state"] = "error"
             access_status_state["locker_id"] = locker_id
             access_status_state["member_id"] = member["id"]
@@ -402,7 +415,7 @@ def create_app() -> Flask:
             access_status_state["updated_at"] = datetime.now(timezone.utc)
             return {"status": "error", "reason": "device_unreachable", "message": "ESP32 device not reachable"}, 503
         except Exception as exc:
-            print(f"[FINGERPRINT ACCESS] ✗ ESP32 unlock error: {exc}")
+            print(f"[FINGERPRINT ACCESS] [ERROR] ESP32 unlock error: {exc}")
             access_status_state["state"] = "error"
             access_status_state["locker_id"] = locker_id
             access_status_state["member_id"] = member["id"]

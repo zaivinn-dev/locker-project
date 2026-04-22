@@ -240,11 +240,18 @@
             <tbody>
       `;
       
+      const currentRole = '{{ current_admin_role }}';
+      
       admins.forEach(admin => {
         const createdDate = new Date(admin.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
         const roleBadge = admin.role === 'Admin' ? 'badge-role-admin' : 'badge-role-staff';
         const statusBadge = admin.status === 'active' ? 'badge-status-active' : 'badge-status-inactive';
         const createdBy = admin.created_by ? escapeHtml(admin.created_by) : 'system';
+        
+        let actionHtml = '';
+        if (currentRole === 'Admin') {
+          actionHtml = `<button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="deleteAdmin(${admin.id}, '${escapeHtml(admin.username)}')">Delete</button>`;
+        }
         
         html += `
           <tr>
@@ -254,7 +261,7 @@
             <td class="text-muted small">${createdDate}</td>
             <td class="text-muted small">${createdBy}</td>
             <td class="text-end pe-4">
-              <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="deleteAdmin(${admin.id}, '${escapeHtml(admin.username)}')">Delete</button>
+              ${actionHtml}
             </td>
           </tr>
         `;

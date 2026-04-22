@@ -110,24 +110,24 @@
     <div class="col-6 col-lg-3">
       <div class="card kpi-card">
         <div class="card-body p-3">
+          <div class="kpi-label">Total Users</div>
+          <div class="kpi-number">{{ stats.total_users|default(0) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
+          <div class="kpi-label">Active Users</div>
+          <div class="kpi-number">{{ stats.active_users|default(0) }}</div>
+        </div>
+      </div>
+    </div>
+    <div class="col-6 col-lg-3">
+      <div class="card kpi-card">
+        <div class="card-body p-3">
           <div class="kpi-label">Total Members</div>
-          <div class="kpi-number">{{ stats.total_members }}</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-6 col-lg-3">
-      <div class="card kpi-card">
-        <div class="card-body p-3">
-          <div class="kpi-label">Total Guests</div>
-          <div class="kpi-number">{{ stats.total_guests }}</div>
-        </div>
-      </div>
-    </div>
-    <div class="col-6 col-lg-3">
-      <div class="card kpi-card">
-        <div class="card-body p-3">
-          <div class="kpi-label">Approved</div>
-          <div class="kpi-number">{{ stats.approved_members }}</div>
+          <div class="kpi-number">{{ stats.total_members|default(0) }}</div>
         </div>
       </div>
     </div>
@@ -156,7 +156,7 @@
       <div class="card kpi-card">
         <div class="card-body p-3">
           <div class="kpi-label">Payments Recorded</div>
-          <div class="kpi-number">{{ stats.monthly_access_count }}</div>
+          <div class="kpi-number">{{ stats.monthly_payments_count|default(0) }}</div>
           <div class="kpi-note">In the last 30 days</div>
         </div>
       </div>
@@ -197,9 +197,9 @@
     <div class="col-lg-3">
       <div class="card shadow-sm rounded-3 chart-card">
         <div class="card-body">
-          <h6 class="card-title mb-3">Guest Category</h6>
+          <h6 class="card-title mb-3">User Category</h6>
           <div class="chart-container">
-            <canvas id="guestCategoryChart"></canvas>
+            <canvas id="userCategoryChart"></canvas>
           </div>
         </div>
       </div>
@@ -278,10 +278,10 @@
     <div class="col-lg-4">
       <div class="card summary-card shadow-sm rounded-3">
         <div class="card-body">
-          <h6 class="mb-3">Guest Breakdown</h6>
+          <h6 class="mb-3">User Breakdown</h6>
           <p>
-            Active guests: <strong>{{ stats.active_guests }}</strong><br>
-            Expired guests: <strong>{{ stats.expired_guests }}</strong>
+            Active members: <strong>{{ stats.approved_members|default(0) }}</strong><br>
+            Active guests: <strong>{{ stats.active_guests|default(0) }}</strong>
           </p>
         </div>
       </div>
@@ -292,7 +292,7 @@
           <h6 class="mb-3">Revenue Insights</h6>
           <p>
             Total revenue: <strong>₱{{ "{:,}".format(stats.total_revenue) }}</strong><br>
-            Payments last 30 days: <strong>{{ stats.monthly_access_count }}</strong>
+            Payments last 30 days: <strong>{{ stats.monthly_payments_count|default(0) }}</strong>
           </p>
         </div>
       </div>
@@ -303,7 +303,7 @@
           <h6 class="mb-3">Activity Stats</h6>
           <p>
             Total access events: <strong>{{ stats.total_access_logs }}</strong><br>
-            Total members: <strong>{{ stats.total_members }}</strong>
+            Total users: <strong>{{ stats.total_users|default(0) }}</strong>
           </p>
         </div>
       </div>
@@ -311,14 +311,14 @@
   </div>
 
   <script>
-    const revenueLabels = {{ daily_revenue | map(attribute='day') | list | tojson }};
-    const revenueValues = {{ daily_revenue | map(attribute='total') | list | tojson }};
-    const actionLabels = {{ top_actions | map(attribute='action') | list | tojson }};
-    const actionValues = {{ top_actions | map(attribute='c') | list | tojson }};
-    const accessLabels = {{ access_by_type | map(attribute='actor_type') | list | tojson }};
-    const accessValues = {{ access_by_type | map(attribute='c') | list | tojson }};
-    const categoryLabels = {{ guest_category_distribution | map(attribute='category') | list | tojson }};
-    const categoryValues = {{ guest_category_distribution | map(attribute='c') | list | tojson }};
+    const revenueLabels = JSON.parse('{{ daily_revenue | map(attribute="day") | list | tojson | safe }}');
+    const revenueValues = JSON.parse('{{ daily_revenue | map(attribute="total") | list | tojson | safe }}');
+    const actionLabels = JSON.parse('{{ top_actions | map(attribute="action") | list | tojson | safe }}');
+    const actionValues = JSON.parse('{{ top_actions | map(attribute="c") | list | tojson | safe }}');
+    const accessLabels = JSON.parse('{{ access_by_type | map(attribute="actor_type") | list | tojson | safe }}');
+    const accessValues = JSON.parse('{{ access_by_type | map(attribute="c") | list | tojson | safe }}');
+    const categoryLabels = JSON.parse('{{ user_category_distribution | map(attribute="category") | list | tojson | safe }}');
+    const categoryValues = JSON.parse('{{ user_category_distribution | map(attribute="c") | list | tojson | safe }}');
 
     function buildChart(ctx, type, data, options) {
       return new Chart(ctx, {
@@ -358,17 +358,17 @@
         }],
       });
 
-      const categoryCtx = document.getElementById('guestCategoryChart').getContext('2d');
+      const categoryCtx = document.getElementById('userCategoryChart').getContext('2d');
       buildChart(categoryCtx, 'pie', {
         labels: categoryLabels,
         datasets: [{
           data: categoryValues,
-          backgroundColor: ['#6610f2', '#20c997', '#0d6efd'],
+          backgroundColor: ['#0d6efd', '#20c997', '#6610f2', '#fd7e14', '#ffc107', '#0dcaf0'],
         }],
       });
 
       if (!categoryLabels.length) {
-        categoryCtx.canvas.parentElement.innerHTML = '<p class="text-muted mb-0">No guest category data available yet.</p>';
+        categoryCtx.canvas.parentElement.innerHTML = '<p class="text-muted mb-0">No user data available yet.</p>';
       }
     });
   </script>

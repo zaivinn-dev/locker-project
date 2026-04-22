@@ -148,7 +148,7 @@
                 </td>
                 <td class="text-muted small access-log-detail">
                   {% if log["detail"] %}
-                    {{ log["detail"]|replace('; ', '<br>')|safe }}
+                    {{ log["detail"]|replace(';', ' <span class="mx-1 fw-bold" style="color: #dee2e6;">|</span> ')|safe }}
                   {% else %}
                     <em>—</em>
                   {% endif %}
