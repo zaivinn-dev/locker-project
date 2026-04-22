@@ -68,7 +68,7 @@ bool beginBackendRequest(HTTPClient &http, const char *url, int timeoutMs) {
   }
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Accept", "application/json");
-  return true;192.168.100.23:5000
+  return true;
 }
 
 int postJsonPayload(const char *url, const String &payload, String &response, int timeoutMs = 2000) {
@@ -1492,3 +1492,4 @@ void printStatus() {
   Serial.println("📋 Available Commands:");
   Serial.println("  reset_fp  - Clear all fingerprint templates");
   Serial.println("  status    - Show this status information");
+}
