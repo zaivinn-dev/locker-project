@@ -417,19 +417,25 @@ def clear_fingerprints():
     try:
         device = get_device_controller()
         if device.clear_fingerprint_templates():
-            # Log the action
+            # Clear all fingerprint associations in the database to stay perfectly in sync
             with connect() as conn:
+                conn.execute("UPDATE members SET fingerprint_uid = NULL")
                 conn.execute(
                     "INSERT INTO access_logs (actor_type, actor_ref, action, detail) VALUES (?,?,?,?)",
-                    ("admin", session.get("admin_username", "unknown"), "fingerprint_clear", "All fingerprint templates cleared from device"),
+                    ("admin", session.get("admin_username", "unknown"), "fingerprint_clear", "All fingerprint templates cleared from device & database"),
                 )
                 conn.commit()
             
-            flask.flash("All fingerprint templates have been cleared from the device", "success")
+            global fingerprint_enrollment_state
+            fingerprint_enrollment_state = {
+                "pending": False,
+                "enrolled_uid": None,
+            }
+            
+            flask.flash("All fingerprint templates have been cleared from the device and database.", "success")
         else:
             # For devices that don't support clearing (like ESP32), we can still clear the database associations
             # and reset the enrollment state
-            global fingerprint_enrollment_state
             fingerprint_enrollment_state = {
                 "pending": False,
                 "enrolled_uid": None,

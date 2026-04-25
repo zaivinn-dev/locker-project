@@ -19,6 +19,8 @@
   .badge-device { background-color: #f8d7da; color: #721c24; }
   .badge-guest { background-color: #e2e3ff; color: #383d7a; }
   .badge-operator { background-color: #ffe5d9; color: #a1320f; }
+  .badge-rfid { background-color: #e0f2fe; color: #0284c7; }
+  .badge-fingerprint { background-color: #f3e8ff; color: #7e22ce; }
 
   .access-logs-wrapper {
     max-height: 640px;
@@ -142,13 +144,13 @@
                   {% endif %}
                 </td>
                 <td>
-                  <span class="badge bg-secondary px-2 py-1" style="font-size: 0.75rem; text-transform: capitalize;">
+                  <span class="badge {% if 'denied' in log['action'] or 'failed' in log['action'] or 'error' in log['action'] %}bg-danger{% elif 'unlock' in log['action'] or 'success' in log['action'] %}bg-success{% elif 'lock' in log['action'] %}bg-info text-dark{% else %}bg-secondary{% endif %} px-2 py-1" style="font-size: 0.75rem; text-transform: capitalize;">
                     {{ log["action"]|replace("_", " ")|title }}
                   </span>
                 </td>
-                <td class="text-muted small access-log-detail">
+                <td class="small access-log-detail {% if 'denied' in log['action'] or 'failed' in log['action'] %}text-danger fw-medium{% else %}text-muted{% endif %}">
                   {% if log["detail"] %}
-                    {{ log["detail"]|replace(';', ' <span class="mx-1 fw-bold" style="color: #dee2e6;">|</span> ')|safe }}
+                    {{ log["detail"]|replace(';', ' <span class="mx-1 fw-bold opacity-50">|</span> ')|safe }}
                   {% else %}
                     <em>—</em>
                   {% endif %}
